@@ -5,6 +5,13 @@ on:
     tags:
       - 'v*.*.*'
 
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number, e.g. 0.10.0'
+        required: true
+        default: '0.10.0'
+
 permissions:
   contents: write
 
@@ -23,14 +30,24 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Get version from tag
+      - name: Resolve version
         id: version
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          if (-not $tag.StartsWith("v")) { throw "Release tag must start with v." }
-          $version = $tag.Substring(1)
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+              $version = "${{ inputs.version }}"
+          }
+          else {
+              $tag = "${{ github.ref_name }}"
+              if (-not $tag.StartsWith("v")) {
+                  throw "Release tag must start with v."
+              }
+
+              $version = $tag.Substring(1)
+          }
+
           "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $version"
 
       - name: Restore
         run: dotnet restore BDOLootTracker.csproj
@@ -54,7 +71,11 @@ jobs:
             RepositoryUrl = "${{ github.server_url }}/${{ github.repository }}"
             IncludePrereleases = $false
           } | ConvertTo-Json
-          Set-Content -Path "publish/update-source.json" -Value $config -Encoding UTF8
+
+          Set-Content `
+            -Path "publish/update-source.json" `
+            -Value $config `
+            -Encoding UTF8
 
       - name: Install Velopack CLI
         run: dotnet tool install -g vpk --version 1.2.0
@@ -80,10 +101,12 @@ jobs:
       - name: Publish GitHub Release
         shell: pwsh
         run: |
+          $tag = "v${{ steps.version.outputs.version }}"
+
           vpk upload github `
             --repoUrl "${{ github.server_url }}/${{ github.repository }}" `
             --token "${{ secrets.GITHUB_TOKEN }}" `
             --publish `
-            --tag "${{ github.ref_name }}" `
-            --releaseName "BDO Loot Tracker ${{ github.ref_name }}" `
+            --tag "$tag" `
+            --releaseName "BDO Loot Tracker $tag" `
             --channel win
