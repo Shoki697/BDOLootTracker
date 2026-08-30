@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -75,6 +76,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Visibility _compactHeaderVisibility = Visibility.Collapsed;
 
     public ObservableCollection<LootRowViewModel> LootRows { get; } = new();
+    public string VersionText { get; } = GetVersionText();
+
+    private static string GetVersionText()
+    {
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        if (version == null)
+            return "v0.0.0";
+
+        return $"v{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
+    }
 
     public string SessionTimeText { get => _sessionTimeText; private set => SetField(ref _sessionTimeText, value); }
     public string TotalSilverText { get => _totalSilverText; private set => SetField(ref _totalSilverText, value); }
@@ -188,6 +199,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (_captureService.IsRunning)
             return;
+
+        if (!NpcapPrerequisiteService.IsInstalled())
+        {
+            StatusText = "Npcap is required for packet capture";
+            NpcapPrerequisiteService.PromptIfMissing();
+            return;
+        }
 
         _settings = _settingsService.Load();
 

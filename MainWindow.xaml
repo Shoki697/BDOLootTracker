@@ -39,6 +39,11 @@
                                FontSize="22"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding VersionText}"
+                               Foreground="{StaticResource Muted}"
+                               FontSize="11"
+                               Margin="8,5,0,0"
+                               VerticalAlignment="Center" />
                 </StackPanel>
 
                 <StackPanel Grid.Column="1"
@@ -119,6 +124,11 @@
                                    FontWeight="SemiBold"
                                    VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding VersionText}"
+                                   Foreground="{StaticResource Muted}"
+                                   FontSize="10"
+                                   Margin="6,4,0,0"
+                                   VerticalAlignment="Center" />
                     </StackPanel>
 
                     <StackPanel Grid.Column="1"
