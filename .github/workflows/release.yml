@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number, e.g. 0.10.2'
+        description: 'Version number, e.g. 0.10.4'
         required: true
-        default: '0.10.2'
+        default: '0.10.4'
 
 permissions:
   contents: write
@@ -85,6 +85,7 @@ jobs:
       - name: Build Velopack installer and update packages
         shell: pwsh
         run: |
+          # Velopack Setup.exe creates Desktop and StartMenuRoot shortcuts by default.
           vpk pack `
             --packId BDOLootTracker `
             --packTitle "BDO Loot Tracker" `

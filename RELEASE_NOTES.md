@@ -1,10 +1,8 @@
-# Release notes
+# BDO Loot Tracker v0.10.4
 
-## v0.9.2
-
-- Stable network packet loot tracking.
-- Local SQLite item/price database and icon cache.
-- Session history and ignore list.
-- Class/spec selection and grind-spot detection.
-- Garmoth session upload.
-- Public GitHub Releases auto-update support via Velopack.
+- Version number is now clearly visible beside the application title.
+- Window title also includes the installed version.
+- Version display reads the executable FileVersion written by the GitHub release workflow.
+- Npcap prerequisite check from the previous installer-polish build is retained.
+- Velopack Setup.exe continues to create Desktop and Start Menu shortcuts automatically.
+- No loot tracking, session, database, Garmoth upload, or packet parsing logic was changed.

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Reflection;
@@ -80,6 +81,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static string GetVersionText()
     {
+        // Prefer the actual executable FileVersion. GitHub Actions writes this
+        // from the release version (eg. 0.10.4.0), so the UI always reflects
+        // the version that is really installed.
+        try
+        {
+            var exePath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(exePath))
+            {
+                var raw = FileVersionInfo.GetVersionInfo(exePath).FileVersion;
+                if (Version.TryParse(raw, out var fileVersion))
+                    return $"v{fileVersion.Major}.{fileVersion.Minor}.{Math.Max(0, fileVersion.Build)}";
+            }
+        }
+        catch
+        {
+            // Fall back to assembly metadata below.
+        }
+
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         if (version == null)
             return "v0.0.0";
@@ -108,6 +127,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         InitializeComponent();
         DataContext = this;
+        Title = $"BDO Loot Tracker — {VersionText}";
 
         _settings = _settingsService.Load();
         _database = new DatabaseService(_settings.DatabasePath);

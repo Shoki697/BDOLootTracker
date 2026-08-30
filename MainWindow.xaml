@@ -39,11 +39,19 @@
                                FontSize="22"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding VersionText}"
-                               Foreground="{StaticResource Muted}"
-                               FontSize="11"
-                               Margin="8,5,0,0"
-                               VerticalAlignment="Center" />
+                    <Border Background="#14202A"
+                            BorderBrush="{StaticResource Border}"
+                            BorderThickness="1"
+                            CornerRadius="5"
+                            Padding="7,2"
+                            Margin="10,0,0,0"
+                            VerticalAlignment="Center">
+                        <TextBlock Text="{Binding VersionText}"
+                                   Foreground="{StaticResource Accent}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                    </Border>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1"
@@ -124,11 +132,18 @@
                                    FontWeight="SemiBold"
                                    VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding VersionText}"
-                                   Foreground="{StaticResource Muted}"
-                                   FontSize="10"
-                                   Margin="6,4,0,0"
-                                   VerticalAlignment="Center" />
+                        <Border Background="#14202A"
+                                BorderBrush="{StaticResource Border}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="5,1"
+                                Margin="7,0,0,0"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="{Binding VersionText}"
+                                       Foreground="{StaticResource Accent}"
+                                       FontSize="10"
+                                       FontWeight="SemiBold" />
+                        </Border>
                     </StackPanel>
 
                     <StackPanel Grid.Column="1"
