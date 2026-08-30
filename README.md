@@ -4,7 +4,7 @@ A Windows desktop loot tracker for Black Desert Online.
 
 ## Current test version
 
-`0.9.2`
+`v0.10.1`
 
 ## Requirements
 
