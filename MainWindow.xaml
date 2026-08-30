@@ -1,0 +1,453 @@
+<Window x:Class="BDOLootTracker.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="BDO Loot Tracker"
+        Width="1220"
+        Height="780"
+        MinWidth="620"
+        MinHeight="650"
+        Background="{StaticResource Bg}"
+        Foreground="{StaticResource Text}"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="18" Background="{StaticResource Bg}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ====================================================== -->
+        <!-- HEADER                                                 -->
+        <!-- ====================================================== -->
+        <Grid Grid.Row="0" Margin="4,2,4,14">
+            <!-- Expanded header -->
+            <Grid Visibility="{Binding ExpandedHeaderVisibility}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="✦"
+                               Foreground="{StaticResource Accent}"
+                               FontSize="24"
+                               Margin="0,0,10,0" />
+                    <TextBlock Text="BDO Loot Tracker"
+                               FontSize="22"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Margin="18,0">
+                    <Border Width="32"
+                            Height="32"
+                            CornerRadius="5"
+                            Background="#0D151D"
+                            BorderBrush="{StaticResource Border}"
+                            BorderThickness="1"
+                            Margin="0,0,8,0">
+                        <Image Source="{Binding HeaderClassIconPath}"
+                               Width="28"
+                               Height="28"
+                               Stretch="Uniform" />
+                    </Border>
+
+                    <TextBlock Text="{Binding HeaderClassText}"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               MaxWidth="175"
+                               TextTrimming="CharacterEllipsis" />
+
+                    <TextBlock Text="  •  "
+                               Foreground="{StaticResource Muted}"
+                               VerticalAlignment="Center" />
+
+                    <TextBlock Text="{Binding HeaderSpotText}"
+                               Foreground="{StaticResource Accent}"
+                               VerticalAlignment="Center"
+                               MaxWidth="210"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Button Content="▤  Sessions"
+                            Click="Sessions_Click"
+                            Margin="0,0,8,0" />
+                    <Button Content="⚙  Settings"
+                            Click="Settings_Click"
+                            Margin="0,0,8,0" />
+                    <Button Content="{Binding LootToggleText}"
+                            Width="42"
+                            Padding="8,6"
+                            Click="ToggleLootPanel_Click" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Compact header. Everything stays inside the width of the
+                 left session cards, so the window can really fold down. -->
+            <Grid Visibility="{Binding CompactHeaderVisibility}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Margin="0,0,8,0">
+                        <TextBlock Text="✦"
+                                   Foreground="{StaticResource Accent}"
+                                   FontSize="21"
+                                   Margin="0,0,8,0" />
+                        <TextBlock Text="BDO Loot Tracker"
+                                   FontSize="18"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <Button Content="▤  Sessions"
+                                Click="Sessions_Click"
+                                Padding="9,6"
+                                Margin="0,0,6,0" />
+                        <Button Content="⚙  Settings"
+                                Click="Settings_Click"
+                                Padding="9,6"
+                                Margin="0,0,6,0" />
+                        <Button Content="{Binding LootToggleText}"
+                                    Width="38"
+                                Padding="7,6"
+                                Click="ToggleLootPanel_Click" />
+                    </StackPanel>
+                </Grid>
+
+                <Grid Grid.Row="1" Margin="0,9,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Width="28"
+                            Height="28"
+                            CornerRadius="5"
+                            Background="#0D151D"
+                            BorderBrush="{StaticResource Border}"
+                            BorderThickness="1"
+                            Margin="0,0,8,0">
+                        <Image Source="{Binding HeaderClassIconPath}"
+                               Width="24"
+                               Height="24"
+                               Stretch="Uniform" />
+                    </Border>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="{Binding HeaderClassText}"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   MaxWidth="185"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="  •  "
+                                   Foreground="{StaticResource Muted}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding HeaderSpotText}"
+                                   Foreground="{StaticResource Accent}"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- ====================================================== -->
+        <!-- TWO-COLUMN DASHBOARD                                   -->
+        <!-- ====================================================== -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="440" />
+                <ColumnDefinition Width="{Binding LootSeparatorWidth}" />
+                <ColumnDefinition Width="{Binding LootColumnWidth}" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ================================================== -->
+            <!-- LEFT: LIVE SESSION                                 -->
+            <!-- ================================================== -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="10" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Session summary -->
+                <Border Grid.Row="0"
+                        Style="{StaticResource PanelBorder}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="1" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0">
+                            <TextBlock Text="SESSION TIME"
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="12" />
+                            <TextBlock Text="{Binding SessionTimeText}"
+                                       FontSize="40"
+                                       FontWeight="SemiBold"
+                                       Margin="0,7,0,0" />
+                        </StackPanel>
+
+                        <Border Grid.Row="1"
+                                Background="{StaticResource Border}"
+                                Margin="0,16,0,16" />
+
+                        <StackPanel Grid.Row="2">
+                            <TextBlock Text="TOTAL SILVER"
+                                       Foreground="{StaticResource Green}"
+                                       FontSize="12" />
+                            <TextBlock Text="{Binding TotalSilverText}"
+                                       FontSize="32"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="0,7,0,0" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Silver / HR -->
+                <Border Grid.Row="2"
+                        Style="{StaticResource PanelBorder}">
+                    <StackPanel>
+                        <TextBlock Text="SILVER / HR"
+                                   Foreground="{StaticResource Green}"
+                                   FontSize="12" />
+                        <TextBlock Text="{Binding SilverPerHourText}"
+                                   FontSize="28"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,7,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Trash / HR -->
+                <Border Grid.Row="4"
+                        Style="{StaticResource PanelBorder}">
+                    <StackPanel>
+                        <TextBlock Text="TRASH / HR"
+                                   Foreground="{StaticResource Accent}"
+                                   FontSize="12" />
+                        <TextBlock Text="{Binding TrashPerHourText}"
+                                   FontSize="28"
+                                   FontWeight="SemiBold"
+                                   Margin="0,7,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Start / Stop -->
+                <StackPanel Grid.Row="6">
+                    <Button x:Name="StartButton"
+                            Content="▶  START"
+                            Height="48"
+                            Background="#168A45"
+                            FontWeight="SemiBold"
+                            Click="Start_Click" />
+
+                    <Button x:Name="StopButton"
+                            Content="■  STOP"
+                            Height="48"
+                            Margin="0,10,0,0"
+                            Background="#B72F2A"
+                            FontWeight="SemiBold"
+                            IsEnabled="False"
+                            Click="Stop_Click" />
+                </StackPanel>
+
+                <!-- Reserved space for future live-session info -->
+                <Border Grid.Row="7"
+                        Margin="0,12,0,0"
+                        Background="Transparent"
+                        BorderThickness="0">
+                    <StackPanel VerticalAlignment="Bottom"
+                                Margin="4,0,4,4">
+                        <TextBlock Text="LIVE SESSION"
+                                   Foreground="{StaticResource Muted}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="Session details and the complete loot list update in real time."
+                                   Foreground="{StaticResource Muted}"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   Margin="0,4,0,0" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ================================================== -->
+            <!-- RIGHT: LOOT LIST                                   -->
+            <!-- ================================================== -->
+            <Border Grid.Column="2"
+                    Visibility="{Binding LootPanelVisibility}"
+                    Style="{StaticResource PanelBorder}"
+                    Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="16,13">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Text="LOOT LIST"
+                                   Foreground="{StaticResource Muted}"
+                                   FontWeight="SemiBold" />
+
+                        <TextBlock Grid.Column="1"
+                                   Text="LIVE"
+                                   Foreground="{StaticResource Green}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold" />
+                    </Grid>
+
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding LootRows}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              CanUserResizeRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              RowHeaderWidth="0"
+                              RowHeight="54"
+                              Background="Transparent"
+                              Foreground="{StaticResource Text}"
+                              BorderThickness="0"
+                              HorizontalGridLinesBrush="{StaticResource Border}">
+                        <DataGrid.Resources>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background" Value="#0F1720" />
+                                <Setter Property="Foreground" Value="{StaticResource Muted}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+                                <Setter Property="Padding" Value="11,9" />
+                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Style>
+
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Foreground" Value="{StaticResource Text}" />
+                            </Style>
+
+                            <Style TargetType="DataGridCell">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Foreground" Value="{StaticResource Text}" />
+                                <Setter Property="BorderThickness" Value="0" />
+                                <Setter Property="Padding" Value="10,6" />
+                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                            </Style>
+                        </DataGrid.Resources>
+
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="ITEM" Width="*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal"
+                                                    VerticalAlignment="Center">
+                                            <Border Width="38"
+                                                    Height="38"
+                                                    CornerRadius="4"
+                                                    Background="#0A1118"
+                                                    Margin="0,0,9,0">
+                                                <Image Source="{Binding IconPath}"
+                                                       Width="36"
+                                                       Height="36"
+                                                       Stretch="Uniform"
+                                                       SnapsToDevicePixels="True" />
+                                            </Border>
+
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Name}"
+                                                           FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding ItemId, StringFormat='ID: {0}'}"
+                                                           Foreground="{StaticResource Muted}"
+                                                           FontSize="10"
+                                                           Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTextColumn Header="QTY"
+                                                Binding="{Binding QuantityText}"
+                                                Width="100" />
+                            <DataGridTextColumn Header="SILVER / UNIT"
+                                                Binding="{Binding UnitPriceText}"
+                                                Width="130" />
+                            <DataGridTextColumn Header="TOTAL SILVER"
+                                                Binding="{Binding TotalSilverText}"
+                                                Width="150" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ====================================================== -->
+        <!-- STATUS BAR                                             -->
+        <!-- ====================================================== -->
+        <Grid Grid.Row="2" Margin="4,12,4,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Text="{Binding StatusText}"
+                       Foreground="{StaticResource Muted}"
+                       TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center"
+                       Margin="0,0,10,0" />
+
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal">
+                <Ellipse Width="9"
+                         Height="9"
+                         Fill="{Binding StatusBrush}"
+                         Margin="0,0,8,0"
+                         VerticalAlignment="Center" />
+                <TextBlock Text="{Binding ConnectionText}" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

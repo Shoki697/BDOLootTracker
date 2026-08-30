@@ -1,0 +1,31 @@
+# Visual Studio / .NET
+.vs/
+bin/
+obj/
+TestResults/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build / Velopack output
+publish/
+Releases/
+artifacts/
+
+# Runtime/user data
+*.db
+*.db-shm
+*.db-wal
+settings.json
+icons/
+class_icons/
+
+# Machine-local update config (release workflow generates the real one)
+update-source.json
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

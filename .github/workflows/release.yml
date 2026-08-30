@@ -1,0 +1,89 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Get version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag.StartsWith("v")) { throw "Release tag must start with v." }
+          $version = $tag.Substring(1)
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore BDOLootTracker.csproj
+
+      - name: Publish self-contained app
+        shell: pwsh
+        run: |
+          dotnet publish BDOLootTracker.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:Version=${{ steps.version.outputs.version }} `
+            -p:AssemblyVersion=${{ steps.version.outputs.version }}.0 `
+            -p:FileVersion=${{ steps.version.outputs.version }}.0 `
+            -o publish
+
+      - name: Write public GitHub update source
+        shell: pwsh
+        run: |
+          $config = @{
+            RepositoryUrl = "${{ github.server_url }}/${{ github.repository }}"
+            IncludePrereleases = $false
+          } | ConvertTo-Json
+          Set-Content -Path "publish/update-source.json" -Value $config -Encoding UTF8
+
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpk --version 1.2.0
+
+      - name: Download previous release metadata
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          vpk download github `
+            --repoUrl "${{ github.server_url }}/${{ github.repository }}" `
+            --token "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Build Velopack installer and update packages
+        shell: pwsh
+        run: |
+          vpk pack `
+            --packId BDOLootTracker `
+            --packVersion "${{ steps.version.outputs.version }}" `
+            --packDir publish `
+            --mainExe BDOLootTracker.exe `
+            --channel win
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        run: |
+          vpk upload github `
+            --repoUrl "${{ github.server_url }}/${{ github.repository }}" `
+            --token "${{ secrets.GITHUB_TOKEN }}" `
+            --publish `
+            --tag "${{ github.ref_name }}" `
+            --releaseName "BDO Loot Tracker ${{ github.ref_name }}" `
+            --channel win
