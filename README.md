@@ -96,8 +96,3 @@ Add your Garmoth API token under **Settings → Garmoth**.
 Completed sessions can then be uploaded from the **Sessions** window.
 
 ---
-
-## Disclaimer
-
-BDO Loot Tracker is an unofficial community project and is not affiliated with or endorsed by Pearl Abyss.
-Use of third-party tools with Black Desert Online is subject to Pearl Abyss' Terms of Service and policies.
