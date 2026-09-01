@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -15,6 +17,26 @@ namespace BDOLootTracker;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
+    // Keep the executable/taskbar/shortcut icon, but hide the tiny icon from
+    // the native title bar. The larger tracker logo is shown in the app UI.
+    private const int GwlExStyle = -20;
+    private const long WsExDlgModalFrame = 0x00000001L;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
     private static readonly TimeSpan MarketMaxAge = TimeSpan.FromDays(7);
     private static readonly TimeSpan AutoSaveInterval = TimeSpan.FromSeconds(10);
     private const double ExpandedMinWidth = 980;
@@ -31,6 +53,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private AppSettings _settings;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _autoSaveTimer;
+    private OverlayWindow? _overlayWindow;
 
     private readonly Dictionary<uint, LootRowViewModel> _rowsById = new();
     private readonly Dictionary<uint, ulong> _sessionLoot = new();
@@ -75,9 +98,38 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Visibility _lootPanelVisibility = Visibility.Visible;
     private Visibility _expandedHeaderVisibility = Visibility.Visible;
     private Visibility _compactHeaderVisibility = Visibility.Collapsed;
+    private Brush _overlayButtonBackground = new SolidColorBrush(Color.FromRgb(20, 32, 42));
+    private Brush _overlayButtonBorderBrush = new SolidColorBrush(Color.FromRgb(42, 62, 77));
 
     public ObservableCollection<LootRowViewModel> LootRows { get; } = new();
     public string VersionText { get; } = GetVersionText();
+
+    private void HideNativeTitleBarIcon()
+    {
+        try
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero)
+                return;
+
+            var exStyle = GetWindowLongPtr(hwnd, GwlExStyle).ToInt64();
+            SetWindowLongPtr(hwnd, GwlExStyle, new IntPtr(exStyle | WsExDlgModalFrame));
+
+            SetWindowPos(
+                hwnd,
+                IntPtr.Zero,
+                0,
+                0,
+                0,
+                0,
+                SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
+        }
+        catch
+        {
+            // Cosmetic only. If Windows rejects the style change, the app
+            // continues normally with its embedded application icon.
+        }
+    }
 
     private static string GetVersionText()
     {
@@ -122,12 +174,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public Visibility LootPanelVisibility { get => _lootPanelVisibility; private set => SetField(ref _lootPanelVisibility, value); }
     public Visibility ExpandedHeaderVisibility { get => _expandedHeaderVisibility; private set => SetField(ref _expandedHeaderVisibility, value); }
     public Visibility CompactHeaderVisibility { get => _compactHeaderVisibility; private set => SetField(ref _compactHeaderVisibility, value); }
+    public Brush OverlayButtonBackground { get => _overlayButtonBackground; private set => SetField(ref _overlayButtonBackground, value); }
+    public Brush OverlayButtonBorderBrush { get => _overlayButtonBorderBrush; private set => SetField(ref _overlayButtonBorderBrush, value); }
+    public IEnumerable<LootRowViewModel> OverlayLootRows => LootRows.Take(Math.Clamp(_settings?.OverlayMaxDisplayedItems ?? 8, 1, 20));
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
         Title = $"BDO Loot Tracker — {VersionText}";
+        SourceInitialized += (_, _) => HideNativeTitleBarIcon();
 
         _settings = _settingsService.Load();
         _database = new DatabaseService(_settings.DatabasePath);
@@ -148,6 +204,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Closed += (_, _) =>
         {
             StopSession(saveSession: true);
+            CloseOverlayWindow();
             _captureService.Dispose();
             _iconCache.Dispose();
         };
@@ -157,6 +214,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         RefreshHeaderContext();
         ApplyLootPanelState(_settings.LootPanelCollapsed, persist: false);
+        ApplyOverlayEnabled(_settings.OverlayEnabled, persist: false);
         Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(CheckDatabaseAtStartup));
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(async () =>
         {
@@ -246,6 +304,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ReloadIgnoredItems(applyToCurrentSession: false);
 
             LootRows.Clear();
+            OnPropertyChanged(nameof(OverlayLootRows));
             _rowsById.Clear();
             _sessionLoot.Clear();
             ResetSpotDetection();
@@ -404,6 +463,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             _rowsById[itemId] = row;
             LootRows.Add(row);
+            OnPropertyChanged(nameof(OverlayLootRows));
 
             if (string.IsNullOrWhiteSpace(row.IconPath) || !File.Exists(row.IconPath))
                 _ = EnsureRowIconAsync(row);
@@ -516,6 +576,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             Owner = this
         };
+        window.MoveOverlayRequested += (_, _) => BeginOverlayPlacement(window);
 
         if (window.ShowDialog() == true)
         {
@@ -524,7 +585,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             ReloadIgnoredItems(applyToCurrentSession: true);
             RefreshVisibleLootDefinitions();
             RefreshHeaderContext();
+            OnPropertyChanged(nameof(OverlayLootRows));
+            RefreshOverlayWindowFromSettings();
             StatusText = $"Settings saved • {_settings.Region}";
+        }
+        else
+        {
+            // Overlay placement is saved independently from the Settings Save button.
+            // Restore the normal overlay even when the rest of Settings is cancelled.
+            _settings = _settingsService.Load();
+            OnPropertyChanged(nameof(OverlayLootRows));
+            RefreshOverlayWindowFromSettings();
         }
     }
 
@@ -567,6 +638,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (rowsToRemove.Count > 0)
             {
+                OnPropertyChanged(nameof(OverlayLootRows));
                 RefreshMetrics();
                 AutoSaveCurrentSession();
             }
@@ -732,6 +804,121 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void Overlay_Click(object sender, RoutedEventArgs e)
+    {
+        ApplyOverlayEnabled(!_settings.OverlayEnabled, persist: true);
+    }
+
+    private void ApplyOverlayEnabled(bool enabled, bool persist)
+    {
+        _settings.OverlayEnabled = enabled;
+
+        if (enabled)
+            EnsureOverlayWindowVisible();
+        else
+            CloseOverlayWindow();
+
+        UpdateOverlayButtonVisual();
+
+        if (persist)
+            _settingsService.Save(_settings);
+    }
+
+    private void UpdateOverlayButtonVisual()
+    {
+        if (_settings.OverlayEnabled)
+        {
+            OverlayButtonBackground = new SolidColorBrush(Color.FromRgb(22, 122, 73));
+            OverlayButtonBorderBrush = new SolidColorBrush(Color.FromRgb(46, 201, 126));
+        }
+        else
+        {
+            OverlayButtonBackground = new SolidColorBrush(Color.FromRgb(20, 32, 42));
+            OverlayButtonBorderBrush = new SolidColorBrush(Color.FromRgb(42, 62, 77));
+        }
+    }
+
+    private void EnsureOverlayWindowVisible()
+    {
+        if (_overlayWindow != null)
+        {
+            if (!_overlayWindow.IsVisible)
+                _overlayWindow.Show();
+            return;
+        }
+
+        _overlayWindow = new OverlayWindow(this, _settingsService, _settings);
+        _overlayWindow.Closed += (_, _) => _overlayWindow = null;
+        _overlayWindow.Show();
+    }
+
+    private void CloseOverlayWindow()
+    {
+        if (_overlayWindow == null)
+            return;
+
+        var window = _overlayWindow;
+        _overlayWindow = null;
+        window.Close();
+    }
+
+    private void RefreshOverlayWindowFromSettings()
+    {
+        UpdateOverlayButtonVisual();
+
+        if (!_settings.OverlayEnabled)
+        {
+            CloseOverlayWindow();
+            return;
+        }
+
+        // Recreate the window so mode, opacity, max item count and saved size are
+        // applied together without leaving any stale WPF layout state behind.
+        CloseOverlayWindow();
+        EnsureOverlayWindowVisible();
+    }
+
+    private void BeginOverlayPlacement(SettingsWindow settingsWindow)
+    {
+        CloseOverlayWindow();
+
+        var previewSettings = settingsWindow.GetOverlayPreviewSettings();
+        OnPropertyChanged(nameof(OverlayLootRows));
+
+        var editor = new OverlayWindow(this, _settingsService, previewSettings, editMode: true);
+        _overlayWindow = editor;
+
+        void RestoreSettingsWindow()
+        {
+            // SettingsWindow was opened with ShowDialog(). Do not Hide()/Show() it,
+            // otherwise WPF loses the modal-dialog state and DialogResult can no
+            // longer be assigned from Save/Cancel. Restore the minimized dialog
+            // instead.
+            if (settingsWindow.WindowState == WindowState.Minimized)
+                settingsWindow.WindowState = WindowState.Normal;
+
+            settingsWindow.Activate();
+            settingsWindow.Focus();
+        }
+
+        editor.PlacementFinished += _ =>
+        {
+            _settings = _settingsService.Load();
+            RestoreSettingsWindow();
+        };
+
+        editor.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_overlayWindow, editor))
+                _overlayWindow = null;
+
+            // Also covers Alt+F4 while placement mode is active.
+            RestoreSettingsWindow();
+        };
+
+        editor.Show();
+    }
+
     private void ToggleLootPanel_Click(object sender, RoutedEventArgs e)
     {
         ApplyLootPanelState(!_lootPanelCollapsed, persist: true);
@@ -775,6 +962,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? name = null)
     {

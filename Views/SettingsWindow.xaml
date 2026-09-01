@@ -2,19 +2,136 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings"
-        Width="700"
+        Width="900"
         Height="780"
+        MinWidth="790"
         MinHeight="650"
         ResizeMode="CanResize"
         Background="{StaticResource Bg}"
         Foreground="{StaticResource Text}"
         WindowStartupLocation="CenterOwner">
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource Bg}">
-        <StackPanel Margin="20">
-            <TextBlock Text="Settings" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,18" />
+    <Window.Resources>
+        <Style x:Key="SettingsNavButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource Text}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="11,9" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="NavBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Left"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="NavBorder" Property="Opacity" Value="0.88" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="NavBorder" Property="Opacity" Value="0.72" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
 
-            <!-- NETWORK -->
-            <Border Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
+    <Grid Background="{StaticResource Bg}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="Settings"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Margin="20,20,20,14" />
+
+        <Grid Grid.Row="1" Margin="20,0,20,20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="170" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="{StaticResource Panel}"
+                    BorderBrush="{StaticResource Border}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="10"
+                    VerticalAlignment="Top">
+                <StackPanel>
+                    <TextBlock Text="QUICK NAVIGATION"
+                               Foreground="{StaticResource Muted}"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Margin="8,4,8,8" />
+
+                    <Button x:Name="NetworkNavButton"
+                            Style="{StaticResource SettingsNavButtonStyle}"
+                            Tag="NetworkSection"
+                            Content="Network"
+                            HorizontalContentAlignment="Left"
+                            Margin="0,0,0,4"
+                            Click="NavigateSection_Click" />
+                    <Button x:Name="DatabaseNavButton"
+                            Style="{StaticResource SettingsNavButtonStyle}"
+                            Tag="DatabaseSection"
+                            Content="Database &amp; Loot"
+                            HorizontalContentAlignment="Left"
+                            Margin="0,0,0,4"
+                            Click="NavigateSection_Click" />
+                    <Button x:Name="CharacterNavButton"
+                            Style="{StaticResource SettingsNavButtonStyle}"
+                            Tag="CharacterSection"
+                            Content="Character"
+                            HorizontalContentAlignment="Left"
+                            Margin="0,0,0,4"
+                            Click="NavigateSection_Click" />
+                    <Button x:Name="GarmothNavButton"
+                            Style="{StaticResource SettingsNavButtonStyle}"
+                            Tag="GarmothSection"
+                            Content="Garmoth"
+                            HorizontalContentAlignment="Left"
+                            Margin="0,0,0,4"
+                            Click="NavigateSection_Click" />
+                    <Button x:Name="OverlayNavButton"
+                            Style="{StaticResource SettingsNavButtonStyle}"
+                            Tag="OverlaySection"
+                            Content="Overlay"
+                            HorizontalContentAlignment="Left"
+                            Margin="0,0,0,4"
+                            Click="NavigateSection_Click" />
+                    <Button x:Name="IgnoreNavButton"
+                            Style="{StaticResource SettingsNavButtonStyle}"
+                            Tag="IgnoreSection"
+                            Content="Ignore List"
+                            HorizontalContentAlignment="Left"
+                            Click="NavigateSection_Click" />
+                </StackPanel>
+            </Border>
+
+            <ScrollViewer x:Name="SettingsScrollViewer"
+                          Grid.Column="2"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="{StaticResource Bg}">
+                <StackPanel x:Name="SettingsContentPanel">
+
+                    <!-- NETWORK -->
+                    <Border x:Name="NetworkSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
                 <StackPanel>
                     <TextBlock Text="NETWORK" Foreground="{StaticResource Accent}" FontWeight="SemiBold" />
                     <TextBlock Text="Network Adapter" Foreground="{StaticResource Muted}" Margin="0,14,0,6" />
@@ -28,8 +145,8 @@
                 </StackPanel>
             </Border>
 
-            <!-- DATABASE + MARKET -->
-            <Border Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
+                    <!-- DATABASE + MARKET -->
+                    <Border x:Name="DatabaseSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
                 <StackPanel>
                     <TextBlock Text="DATABASE &amp; LOOT DATA"
                                Foreground="{StaticResource Accent}"
@@ -118,8 +235,8 @@
                 </StackPanel>
             </Border>
 
-            <!-- CHARACTER -->
-            <Border Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                    <!-- CHARACTER -->
+                    <Border x:Name="CharacterSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="CHARACTER (OPTIONAL)"
                                Foreground="{StaticResource Accent}"
@@ -200,8 +317,8 @@
                 </StackPanel>
             </Border>
 
-            <!-- GARMOTH -->
-            <Border Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                    <!-- GARMOTH -->
+                    <Border x:Name="GarmothSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="GARMOTH"
                                Foreground="{StaticResource Accent}"
@@ -221,8 +338,108 @@
                 </StackPanel>
             </Border>
 
-            <!-- IGNORE LIST -->
-            <Border Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+
+                    <!-- OVERLAY -->
+                    <Border x:Name="OverlaySection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="OVERLAY"
+                               Foreground="{StaticResource Accent}"
+                               FontWeight="SemiBold" />
+
+                    <TextBlock Text="Optional in-game session overlay. Turn it on/off from the main window. Mouse clicks always pass through it during normal use."
+                               Foreground="{StaticResource Muted}"
+                               FontSize="12"
+                               TextWrapping="Wrap"
+                               Margin="0,8,0,0" />
+
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Overlay mode"
+                                       Foreground="{StaticResource Muted}"
+                                       Margin="0,0,0,6" />
+                            <ComboBox x:Name="OverlayModeCombo" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Maximum displayed items"
+                                       Foreground="{StaticResource Muted}"
+                                       Margin="0,0,0,6" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="34" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="OverlayMaxItemsBox"
+                                         Grid.Column="0"
+                                         HorizontalContentAlignment="Center"
+                                         PreviewTextInput="OverlayMaxItemsBox_PreviewTextInput"
+                                         LostFocus="OverlayMaxItemsBox_LostFocus" />
+                                <Grid Grid.Column="1" Margin="4,0,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Button Grid.Row="0" Content="▲" Padding="0" FontSize="9" Click="OverlayMaxItemsUp_Click" />
+                                    <Button Grid.Row="1" Content="▼" Padding="0" FontSize="9" Click="OverlayMaxItemsDown_Click" />
+                                </Grid>
+                            </Grid>
+                            <TextBlock Text="1–20 • Detailed mode only"
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="10"
+                                       Margin="0,4,0,0" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Background opacity"
+                                   Foreground="{StaticResource Muted}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,12,0" />
+                        <Slider x:Name="OverlayOpacitySlider"
+                                Grid.Column="1"
+                                Minimum="10"
+                                Maximum="100"
+                                TickFrequency="5"
+                                ValueChanged="OverlayOpacitySlider_ValueChanged"
+                                VerticalAlignment="Center" />
+                        <TextBlock x:Name="OverlayOpacityValueText"
+                                   Grid.Column="2"
+                                   Width="48"
+                                   TextAlignment="Right"
+                                   Foreground="{StaticResource Text}"
+                                   VerticalAlignment="Center"
+                                   Margin="10,0,0,0" />
+                    </Grid>
+
+                    <Button x:Name="MoveOverlayButton"
+                            Content="MOVE OVERLAY"
+                            Background="#1266A8"
+                            FontWeight="SemiBold"
+                            HorizontalAlignment="Left"
+                            Margin="0,14,0,0"
+                            Click="MoveOverlay_Click" />
+
+                    <TextBlock Text="Move mode temporarily disables click-through. Drag the green header to move, resize from the bottom-right corner, then press Save."
+                               Foreground="{StaticResource Muted}"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="0,8,0,0" />
+                </StackPanel>
+            </Border>
+
+                    <!-- IGNORE LIST -->
+                    <Border x:Name="IgnoreSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -272,6 +489,8 @@
                         Content="Cancel"
                         Click="Cancel_Click" />
             </Grid>
-        </StackPanel>
-    </ScrollViewer>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
 </Window>

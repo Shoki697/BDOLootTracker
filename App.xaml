@@ -38,6 +38,7 @@
             <Setter Property="Background" Value="{StaticResource Bg}" />
             <Setter Property="Foreground" Value="{StaticResource Text}" />
             <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="Icon" Value="/Resources/AppIcon.ico" />
         </Style>
 
         <Style TargetType="TextBlock">

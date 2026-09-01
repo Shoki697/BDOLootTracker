@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using BDOLootTracker.Models;
 using BDOLootTracker.Services;
 using Microsoft.Win32;
@@ -19,6 +20,8 @@ public partial class SettingsWindow : Window
     private bool _isLoading = true;
     private bool _isFetching;
 
+    public event EventHandler? MoveOverlayRequested;
+
     public SettingsWindow(SettingsService settingsService)
     {
         InitializeComponent();
@@ -31,6 +34,7 @@ public partial class SettingsWindow : Window
         _isLoading = false;
         RefreshDatabaseStatus();
         RefreshIgnoreList();
+        SetActiveNavButton(NetworkNavButton);
 
         Closing += SettingsWindow_Closing;
         Closed += (_, _) =>
@@ -38,6 +42,58 @@ public partial class SettingsWindow : Window
             _classIconService?.Dispose();
             _fetchService.Dispose();
         };
+    }
+
+
+    private void NavigateSection_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string sectionName)
+            return;
+
+        FrameworkElement? section = sectionName switch
+        {
+            nameof(NetworkSection) => NetworkSection,
+            nameof(DatabaseSection) => DatabaseSection,
+            nameof(CharacterSection) => CharacterSection,
+            nameof(GarmothSection) => GarmothSection,
+            nameof(OverlaySection) => OverlaySection,
+            nameof(IgnoreSection) => IgnoreSection,
+            _ => null
+        };
+
+        if (section == null)
+            return;
+
+        // Translate the section into the scrolling content's coordinate system.
+        // This gives deterministic jumps even when panel heights change after a
+        // database refresh or when the window is resized.
+        Point point = section.TranslatePoint(new Point(0, 0), SettingsContentPanel);
+        SettingsScrollViewer.ScrollToVerticalOffset(Math.Max(0, point.Y));
+        SetActiveNavButton(button);
+    }
+
+    private void SetActiveNavButton(Button activeButton)
+    {
+        Button[] buttons =
+        {
+            NetworkNavButton,
+            DatabaseNavButton,
+            CharacterNavButton,
+            GarmothNavButton,
+            OverlayNavButton,
+            IgnoreNavButton
+        };
+
+        foreach (Button button in buttons)
+        {
+            button.Background = ReferenceEquals(button, activeButton)
+                ? (System.Windows.Media.Brush)FindResource("PanelHover")
+                : System.Windows.Media.Brushes.Transparent;
+
+            button.BorderBrush = ReferenceEquals(button, activeButton)
+                ? (System.Windows.Media.Brush)FindResource("Accent")
+                : System.Windows.Media.Brushes.Transparent;
+        }
     }
 
     private void SettingsWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -86,6 +142,14 @@ public partial class SettingsWindow : Window
         DatabasePathBox.Text = _settings.DatabasePath;
         CharacterBox.Text = _settings.CharacterName;
         GarmothApiKeyBox.Password = _settings.GarmothApiKey ?? string.Empty;
+
+        OverlayModeCombo.ItemsSource = new[] { "Detailed", "Compact" };
+        OverlayModeCombo.SelectedItem = string.Equals(_settings.OverlayMode, "Compact", StringComparison.OrdinalIgnoreCase)
+            ? "Compact"
+            : "Detailed";
+        OverlayOpacitySlider.Value = Math.Clamp(_settings.OverlayBackgroundOpacity, 0.10, 1.0) * 100.0;
+        OverlayOpacityValueText.Text = $"{OverlayOpacitySlider.Value:0}%";
+        OverlayMaxItemsBox.Text = Math.Clamp(_settings.OverlayMaxDisplayedItems, 1, 20).ToString();
 
         ReloadCharacterClassesFromCurrentPath(
             preferredClassType: _settings.CharacterClassType,
@@ -410,6 +474,9 @@ public partial class SettingsWindow : Window
         _settings.CharacterName = CharacterBox.Text.Trim();
         _settings.DatabasePath = databasePath;
         _settings.GarmothApiKey = GarmothApiKeyBox.Password.Trim();
+        _settings.OverlayMode = OverlayModeCombo.SelectedItem?.ToString() == "Compact" ? "Compact" : "Detailed";
+        _settings.OverlayBackgroundOpacity = Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.10, 1.0);
+        _settings.OverlayMaxDisplayedItems = GetOverlayMaxItems();
 
         _settingsService.Save(_settings);
 
@@ -485,6 +552,10 @@ public partial class SettingsWindow : Window
         ClassCombo.IsEnabled = enabled;
         CharacterBox.IsEnabled = enabled;
         GarmothApiKeyBox.IsEnabled = enabled;
+        OverlayModeCombo.IsEnabled = enabled;
+        OverlayOpacitySlider.IsEnabled = enabled;
+        OverlayMaxItemsBox.IsEnabled = enabled;
+        MoveOverlayButton.IsEnabled = enabled;
         SpecCombo.IsEnabled = enabled &&
                               ClassCombo.SelectedItem is CharacterClassOption selected &&
                               selected.ClassType >= 0 &&
@@ -494,6 +565,57 @@ public partial class SettingsWindow : Window
         FetchButton.IsEnabled = enabled;
         SaveButton.IsEnabled = enabled;
         CancelButton.IsEnabled = enabled;
+    }
+
+    private void OverlayOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (OverlayOpacityValueText != null)
+            OverlayOpacityValueText.Text = $"{e.NewValue:0}%";
+    }
+
+    private void OverlayMaxItemsBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
+        => e.Handled = e.Text.Any(ch => !char.IsDigit(ch));
+
+    private void OverlayMaxItemsBox_LostFocus(object sender, RoutedEventArgs e)
+        => OverlayMaxItemsBox.Text = GetOverlayMaxItems().ToString();
+
+    private void OverlayMaxItemsUp_Click(object sender, RoutedEventArgs e)
+        => OverlayMaxItemsBox.Text = Math.Min(20, GetOverlayMaxItems() + 1).ToString();
+
+    private void OverlayMaxItemsDown_Click(object sender, RoutedEventArgs e)
+        => OverlayMaxItemsBox.Text = Math.Max(1, GetOverlayMaxItems() - 1).ToString();
+
+    private int GetOverlayMaxItems()
+    {
+        if (!int.TryParse(OverlayMaxItemsBox.Text, out int value))
+            value = 8;
+
+        return Math.Clamp(value, 1, 20);
+    }
+
+    public AppSettings GetOverlayPreviewSettings()
+    {
+        var preview = _settingsService.Load();
+        preview.OverlayMode = OverlayModeCombo.SelectedItem?.ToString() == "Compact" ? "Compact" : "Detailed";
+        preview.OverlayBackgroundOpacity = Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.10, 1.0);
+        preview.OverlayMaxDisplayedItems = GetOverlayMaxItems();
+        return preview;
+    }
+
+    private void MoveOverlay_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isFetching)
+            return;
+
+        OverlayMaxItemsBox.Text = GetOverlayMaxItems().ToString();
+
+        // Keep the Settings window in its original ShowDialog() modal state.
+        // Hiding and later calling Show() turns it into a normal window, which
+        // makes DialogResult throw when Save/Cancel is pressed. Minimizing it
+        // keeps the modal dialog alive while leaving the screen free for overlay
+        // placement.
+        WindowState = WindowState.Minimized;
+        MoveOverlayRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private string GetSelectedRegion()

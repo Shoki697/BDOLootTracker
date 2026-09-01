@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <StartupObject>BDOLootTracker.App</StartupObject>
+    <ApplicationIcon>Resources\AppIcon.ico</ApplicationIcon>
     <Version>0.10.4</Version>
     <AssemblyVersion>0.10.4.0</AssemblyVersion>
     <FileVersion>0.10.4.0</FileVersion>
@@ -14,6 +15,12 @@
   <ItemGroup>
     <ApplicationDefinition Remove="App.xaml" />
     <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\AppIcon.png" />
+    <Resource Include="Resources\AppIcon.ico" />
+    <Resource Include="Resources\HeaderLogo.png" />
   </ItemGroup>
 
   <ItemGroup>

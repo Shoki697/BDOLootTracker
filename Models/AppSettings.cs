@@ -13,4 +13,16 @@ public sealed class AppSettings
 
     // Remembers whether the right-side live loot list was collapsed.
     public bool LootPanelCollapsed { get; set; }
+
+    // Optional in-game overlay.
+    public bool OverlayEnabled { get; set; }
+    public string OverlayMode { get; set; } = "Detailed";
+    public double OverlayBackgroundOpacity { get; set; } = 0.85;
+    public int OverlayMaxDisplayedItems { get; set; } = 8;
+    public double OverlayLeft { get; set; } = 30;
+    public double OverlayTop { get; set; } = 80;
+    public double OverlayDetailedWidth { get; set; } = 390;
+    public double OverlayDetailedHeight { get; set; } = 540;
+    public double OverlayCompactWidth { get; set; } = 390;
+    public double OverlayCompactHeight { get; set; } = 165;
 }
