@@ -1,4 +1,4 @@
-# BDO Loot Tracker
+# BDO Loot Tracker - WIP
 
 A Windows desktop loot tracker for Black Desert Online.
 
