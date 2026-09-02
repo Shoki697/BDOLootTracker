@@ -1,0 +1,23 @@
+{
+  "0.12.0": {
+    "title": "What's New",
+    "changes": [
+      {
+        "title": "Storage filtering",
+        "description": "Storage and Transaction Maid withdrawals detected by the tested transfer packet are no longer counted as loot."
+      },
+      {
+        "title": "Overlay improvements",
+        "description": "Overlay position saving is more reliable, a reset button was added, and the loot list can now be sorted by quantity, last loot time, total value, or unit price."
+      },
+      {
+        "title": "System Tray",
+        "description": "Closing the main window now lets you exit, cancel, or keep the tracker running in the system tray while the overlay remains available."
+      },
+      {
+        "title": "Global keybinds",
+        "description": "Optional global shortcuts can toggle Start / Stop Tracking and Overlay ON / OFF, even while BDO is focused or the tracker is in the tray."
+      }
+    ]
+  }
+}

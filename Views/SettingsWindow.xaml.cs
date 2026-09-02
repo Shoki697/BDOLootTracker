@@ -21,6 +21,7 @@ public partial class SettingsWindow : Window
     private bool _isFetching;
 
     public event EventHandler? MoveOverlayRequested;
+    public event EventHandler? OverlayResetRequested;
 
     public SettingsWindow(SettingsService settingsService)
     {
@@ -57,6 +58,7 @@ public partial class SettingsWindow : Window
             nameof(CharacterSection) => CharacterSection,
             nameof(GarmothSection) => GarmothSection,
             nameof(OverlaySection) => OverlaySection,
+            nameof(KeybindsSection) => KeybindsSection,
             nameof(IgnoreSection) => IgnoreSection,
             _ => null
         };
@@ -81,6 +83,7 @@ public partial class SettingsWindow : Window
             CharacterNavButton,
             GarmothNavButton,
             OverlayNavButton,
+            KeybindsNavButton,
             IgnoreNavButton
         };
 
@@ -150,6 +153,14 @@ public partial class SettingsWindow : Window
         OverlayOpacitySlider.Value = Math.Clamp(_settings.OverlayBackgroundOpacity, 0.10, 1.0) * 100.0;
         OverlayOpacityValueText.Text = $"{OverlayOpacitySlider.Value:0}%";
         OverlayMaxItemsBox.Text = Math.Clamp(_settings.OverlayMaxDisplayedItems, 1, 20).ToString();
+
+        OverlaySortByCombo.ItemsSource = new[] { "Quantity", "Last Looted", "Total Value", "Unit Price" };
+        OverlaySortByCombo.SelectedItem = NormalizeOverlaySortBy(_settings.OverlaySortBy);
+        OverlaySortOrderCombo.ItemsSource = new[] { "Descending", "Ascending" };
+        OverlaySortOrderCombo.SelectedItem = _settings.OverlaySortDescending ? "Descending" : "Ascending";
+
+        StartStopHotkeyBox.Text = NormalizeHotkeyText(_settings.StartStopHotkey);
+        OverlayHotkeyBox.Text = NormalizeHotkeyText(_settings.OverlayHotkey);
 
         ReloadCharacterClassesFromCurrentPath(
             preferredClassType: _settings.CharacterClassType,
@@ -466,19 +477,42 @@ public partial class SettingsWindow : Window
         CharacterClassOption? selectedClass = ClassCombo.SelectedItem as CharacterClassOption;
         bool classSelected = selectedClass != null && selectedClass.ClassType >= 0;
 
-        _settings.AdapterName = adapter.Name;
-        _settings.Region = region;
-        _settings.ItemLanguage = language;
-        _settings.CharacterClassType = classSelected ? selectedClass!.ClassType : null;
-        _settings.CharacterSpec = classSelected ? (SpecCombo.SelectedItem?.ToString() ?? string.Empty) : string.Empty;
-        _settings.CharacterName = CharacterBox.Text.Trim();
-        _settings.DatabasePath = databasePath;
-        _settings.GarmothApiKey = GarmothApiKeyBox.Password.Trim();
-        _settings.OverlayMode = OverlayModeCombo.SelectedItem?.ToString() == "Compact" ? "Compact" : "Detailed";
-        _settings.OverlayBackgroundOpacity = Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.10, 1.0);
-        _settings.OverlayMaxDisplayedItems = GetOverlayMaxItems();
+        string startStopHotkey = NormalizeHotkeyText(StartStopHotkeyBox.Text);
+        string overlayHotkey = NormalizeHotkeyText(OverlayHotkeyBox.Text);
+        if (!string.Equals(startStopHotkey, "None", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(startStopHotkey, overlayHotkey, StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(
+                "Start / Stop Tracking and Toggle Overlay must use different shortcuts.",
+                "Keybinds",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
 
-        _settingsService.Save(_settings);
+        // Load the newest settings immediately before saving. Overlay placement is
+        // saved independently by the placement window; using this fresh object
+        // prevents the Settings dialog from overwriting a newly saved position
+        // with the stale coordinates it had when the dialog was first opened.
+        var settingsToSave = _settingsService.Load();
+        settingsToSave.AdapterName = adapter.Name;
+        settingsToSave.Region = region;
+        settingsToSave.ItemLanguage = language;
+        settingsToSave.CharacterClassType = classSelected ? selectedClass!.ClassType : null;
+        settingsToSave.CharacterSpec = classSelected ? (SpecCombo.SelectedItem?.ToString() ?? string.Empty) : string.Empty;
+        settingsToSave.CharacterName = CharacterBox.Text.Trim();
+        settingsToSave.DatabasePath = databasePath;
+        settingsToSave.GarmothApiKey = GarmothApiKeyBox.Password.Trim();
+        settingsToSave.OverlayMode = OverlayModeCombo.SelectedItem?.ToString() == "Compact" ? "Compact" : "Detailed";
+        settingsToSave.OverlayBackgroundOpacity = Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.10, 1.0);
+        settingsToSave.OverlayMaxDisplayedItems = GetOverlayMaxItems();
+        settingsToSave.OverlaySortBy = NormalizeOverlaySortBy(OverlaySortByCombo.SelectedItem?.ToString());
+        settingsToSave.OverlaySortDescending = OverlaySortOrderCombo.SelectedItem?.ToString() != "Ascending";
+        settingsToSave.StartStopHotkey = startStopHotkey;
+        settingsToSave.OverlayHotkey = overlayHotkey;
+
+        _settingsService.Save(settingsToSave);
+        _settings = settingsToSave;
 
         DialogResult = true;
         Close();
@@ -555,7 +589,14 @@ public partial class SettingsWindow : Window
         OverlayModeCombo.IsEnabled = enabled;
         OverlayOpacitySlider.IsEnabled = enabled;
         OverlayMaxItemsBox.IsEnabled = enabled;
+        OverlaySortByCombo.IsEnabled = enabled;
+        OverlaySortOrderCombo.IsEnabled = enabled;
         MoveOverlayButton.IsEnabled = enabled;
+        ResetOverlayPositionButton.IsEnabled = enabled;
+        StartStopHotkeyBox.IsEnabled = enabled;
+        OverlayHotkeyBox.IsEnabled = enabled;
+        ClearStartStopHotkeyButton.IsEnabled = enabled;
+        ClearOverlayHotkeyButton.IsEnabled = enabled;
         SpecCombo.IsEnabled = enabled &&
                               ClassCombo.SelectedItem is CharacterClassOption selected &&
                               selected.ClassType >= 0 &&
@@ -599,6 +640,8 @@ public partial class SettingsWindow : Window
         preview.OverlayMode = OverlayModeCombo.SelectedItem?.ToString() == "Compact" ? "Compact" : "Detailed";
         preview.OverlayBackgroundOpacity = Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.10, 1.0);
         preview.OverlayMaxDisplayedItems = GetOverlayMaxItems();
+        preview.OverlaySortBy = NormalizeOverlaySortBy(OverlaySortByCombo.SelectedItem?.ToString());
+        preview.OverlaySortDescending = OverlaySortOrderCombo.SelectedItem?.ToString() != "Ascending";
         return preview;
     }
 
@@ -617,6 +660,76 @@ public partial class SettingsWindow : Window
         WindowState = WindowState.Minimized;
         MoveOverlayRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    private void ResetOverlayPosition_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isFetching)
+            return;
+
+        var latest = _settingsService.Load();
+        latest.OverlayLeft = 30;
+        latest.OverlayTop = 80;
+        latest.OverlayDetailedWidth = 390;
+        latest.OverlayDetailedHeight = 540;
+        latest.OverlayCompactWidth = 390;
+        latest.OverlayCompactHeight = 165;
+        _settingsService.Save(latest);
+        _settings = latest;
+
+        OverlayResetRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static string NormalizeOverlaySortBy(string? value)
+        => value switch
+        {
+            "Last Looted" => "Last Looted",
+            "Total Value" => "Total Value",
+            "Unit Price" => "Unit Price",
+            _ => "Quantity"
+        };
+
+    private static string NormalizeHotkeyText(string? value)
+        => string.IsNullOrWhiteSpace(value) || string.Equals(value.Trim(), "None", StringComparison.OrdinalIgnoreCase)
+            ? "None"
+            : value.Trim();
+
+    private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox box)
+            return;
+
+        e.Handled = true;
+
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or
+            Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
+            return;
+
+        if ((key == Key.Back || key == Key.Delete || key == Key.Escape) && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            box.Text = "None";
+            return;
+        }
+
+        ModifierKeys modifiers = Keyboard.Modifiers;
+        bool isFunctionKey = key >= Key.F1 && key <= Key.F24;
+        if (modifiers == ModifierKeys.None && !isFunctionKey)
+            return;
+
+        var parts = new List<string>();
+        if (modifiers.HasFlag(ModifierKeys.Control)) parts.Add("Ctrl");
+        if (modifiers.HasFlag(ModifierKeys.Alt)) parts.Add("Alt");
+        if (modifiers.HasFlag(ModifierKeys.Shift)) parts.Add("Shift");
+        if (modifiers.HasFlag(ModifierKeys.Windows)) parts.Add("Win");
+        parts.Add(key.ToString());
+        box.Text = string.Join("+", parts);
+    }
+
+    private void ClearStartStopHotkey_Click(object sender, RoutedEventArgs e)
+        => StartStopHotkeyBox.Text = "None";
+
+    private void ClearOverlayHotkey_Click(object sender, RoutedEventArgs e)
+        => OverlayHotkeyBox.Text = "None";
 
     private string GetSelectedRegion()
         => DatabaseService.NormalizeRegion(RegionCombo.SelectedItem?.ToString() ?? "EU");

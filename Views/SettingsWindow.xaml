@@ -114,6 +114,13 @@
                             HorizontalContentAlignment="Left"
                             Margin="0,0,0,4"
                             Click="NavigateSection_Click" />
+                    <Button x:Name="KeybindsNavButton"
+                            Style="{StaticResource SettingsNavButtonStyle}"
+                            Tag="KeybindsSection"
+                            Content="Keybinds"
+                            HorizontalContentAlignment="Left"
+                            Margin="0,0,0,4"
+                            Click="NavigateSection_Click" />
                     <Button x:Name="IgnoreNavButton"
                             Style="{StaticResource SettingsNavButtonStyle}"
                             Tag="IgnoreSection"
@@ -398,6 +405,28 @@
 
                     <Grid Margin="0,14,0,0">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Loot list sort by"
+                                       Foreground="{StaticResource Muted}"
+                                       Margin="0,0,0,6" />
+                            <ComboBox x:Name="OverlaySortByCombo" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Sort order"
+                                       Foreground="{StaticResource Muted}"
+                                       Margin="0,0,0,6" />
+                            <ComboBox x:Name="OverlaySortOrderCombo" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -422,13 +451,23 @@
                                    Margin="10,0,0,0" />
                     </Grid>
 
-                    <Button x:Name="MoveOverlayButton"
-                            Content="MOVE OVERLAY"
-                            Background="#1266A8"
-                            FontWeight="SemiBold"
-                            HorizontalAlignment="Left"
-                            Margin="0,14,0,0"
-                            Click="MoveOverlay_Click" />
+                    <Grid Margin="0,14,0,0" HorizontalAlignment="Left">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="MoveOverlayButton"
+                                Grid.Column="0"
+                                Content="MOVE OVERLAY"
+                                Background="#1266A8"
+                                FontWeight="SemiBold"
+                                Click="MoveOverlay_Click" />
+                        <Button x:Name="ResetOverlayPositionButton"
+                                Grid.Column="2"
+                                Content="RESET POSITION"
+                                Click="ResetOverlayPosition_Click" />
+                    </Grid>
 
                     <TextBlock Text="Move mode temporarily disables click-through. Drag the green header to move, resize from the bottom-right corner, then press Save."
                                Foreground="{StaticResource Muted}"
@@ -437,6 +476,69 @@
                                Margin="0,8,0,0" />
                 </StackPanel>
             </Border>
+
+                    <!-- KEYBINDS -->
+                    <Border x:Name="KeybindsSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="KEYBINDS"
+                                       Foreground="{StaticResource Accent}"
+                                       FontWeight="SemiBold" />
+
+                            <TextBlock Text="Optional global shortcuts. They work while BDO is focused and while the tracker is hidden in the system tray. Click a field, then press the desired key combination. Backspace, Delete or Escape clears it."
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="12"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0" />
+
+                            <Grid Margin="0,14,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="190" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Start / Stop Tracking"
+                                           Foreground="{StaticResource Muted}"
+                                           VerticalAlignment="Center" />
+                                <TextBox x:Name="StartStopHotkeyBox"
+                                         Grid.Column="1"
+                                         IsReadOnly="True"
+                                         HorizontalContentAlignment="Center"
+                                         PreviewKeyDown="HotkeyBox_PreviewKeyDown" />
+                                <Button x:Name="ClearStartStopHotkeyButton"
+                                        Grid.Column="3"
+                                        Content="Clear"
+                                        Click="ClearStartStopHotkey_Click" />
+                            </Grid>
+
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="190" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Toggle Overlay"
+                                           Foreground="{StaticResource Muted}"
+                                           VerticalAlignment="Center" />
+                                <TextBox x:Name="OverlayHotkeyBox"
+                                         Grid.Column="1"
+                                         IsReadOnly="True"
+                                         HorizontalContentAlignment="Center"
+                                         PreviewKeyDown="HotkeyBox_PreviewKeyDown" />
+                                <Button x:Name="ClearOverlayHotkeyButton"
+                                        Grid.Column="3"
+                                        Content="Clear"
+                                        Click="ClearOverlayHotkey_Click" />
+                            </Grid>
+
+                            <TextBlock Text="Tip: function keys (F1–F24) can be used alone. Other keys require Ctrl, Alt, Shift or Win to avoid taking over normal typing."
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0" />
+                        </StackPanel>
+                    </Border>
 
                     <!-- IGNORE LIST -->
                     <Border x:Name="IgnoreSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">

@@ -10,6 +10,7 @@ public sealed class LootRowViewModel : INotifyPropertyChanged
     private string _name = string.Empty;
     private string? _iconPath;
     private bool _isTrash;
+    private DateTime _lastLootedUtc;
 
     public uint ItemId { get; init; }
 
@@ -29,6 +30,13 @@ public sealed class LootRowViewModel : INotifyPropertyChanged
     {
         get => _isTrash;
         set => SetField(ref _isTrash, value);
+    }
+
+
+    public DateTime LastLootedUtc
+    {
+        get => _lastLootedUtc;
+        set => SetField(ref _lastLootedUtc, value);
     }
 
     public ulong Quantity

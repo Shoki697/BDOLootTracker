@@ -9,6 +9,9 @@ namespace BDOLootTracker.Services;
 /// <summary>
 /// A grind loot / price adatokat a Garmoth publikus grind-tracker végpontjáról tölti le.
 ///
+/// A MikeBrowni3 OCR Loot Tracker ugyanezt a végpontot használja:
+/// https://api.garmoth.com/api/external/grind-tracker?region=eu&lang=us
+///
 /// A válasz "drops" része tartalmazza többek között az item ID-t, nevet,
 /// árat, ikont, valamint trash / rare jelölést. A külön grind-spot referencia
 /// végpontot a tracker csak Database Fetch közben tölti le, majd SQLite-ban

@@ -7,11 +7,13 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using BDOLootTracker.Models;
 using BDOLootTracker.Services;
 using BDOLootTracker.Views;
+using Forms = System.Windows.Forms;
 
 namespace BDOLootTracker;
 
@@ -37,6 +39,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private static extern bool SetWindowPos(
         IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    private const int WmHotKey = 0x0312;
+    private const int StartStopHotkeyId = 0xB001;
+    private const int OverlayHotkeyId = 0xB002;
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+    private const uint ModShift = 0x0004;
+    private const uint ModWin = 0x0008;
+    private const uint ModNoRepeat = 0x4000;
+
     private static readonly TimeSpan MarketMaxAge = TimeSpan.FromDays(7);
     private static readonly TimeSpan AutoSaveInterval = TimeSpan.FromSeconds(10);
     private const double ExpandedMinWidth = 980;
@@ -54,6 +71,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _autoSaveTimer;
     private OverlayWindow? _overlayWindow;
+    private Forms.NotifyIcon? _trayIcon;
+    private HwndSource? _hwndSource;
+    private IntPtr _mainHwnd;
+    private bool _allowClose;
+    private bool _closePromptOpen;
 
     private readonly Dictionary<uint, LootRowViewModel> _rowsById = new();
     private readonly Dictionary<uint, ulong> _sessionLoot = new();
@@ -176,14 +198,40 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public Visibility CompactHeaderVisibility { get => _compactHeaderVisibility; private set => SetField(ref _compactHeaderVisibility, value); }
     public Brush OverlayButtonBackground { get => _overlayButtonBackground; private set => SetField(ref _overlayButtonBackground, value); }
     public Brush OverlayButtonBorderBrush { get => _overlayButtonBorderBrush; private set => SetField(ref _overlayButtonBorderBrush, value); }
-    public IEnumerable<LootRowViewModel> OverlayLootRows => LootRows.Take(Math.Clamp(_settings?.OverlayMaxDisplayedItems ?? 8, 1, 20));
+    public IEnumerable<LootRowViewModel> OverlayLootRows
+    {
+        get
+        {
+            int maxItems = Math.Clamp(_settings?.OverlayMaxDisplayedItems ?? 8, 1, 20);
+            string sortBy = _settings?.OverlaySortBy ?? "Quantity";
+            bool descending = _settings?.OverlaySortDescending ?? true;
+
+            IOrderedEnumerable<LootRowViewModel> ordered = sortBy switch
+            {
+                "Last Looted" => descending
+                    ? LootRows.OrderByDescending(x => x.LastLootedUtc)
+                    : LootRows.OrderBy(x => x.LastLootedUtc),
+                "Total Value" => descending
+                    ? LootRows.OrderByDescending(x => x.TotalSilver)
+                    : LootRows.OrderBy(x => x.TotalSilver),
+                "Unit Price" => descending
+                    ? LootRows.OrderByDescending(x => x.UnitPrice)
+                    : LootRows.OrderBy(x => x.UnitPrice),
+                _ => descending
+                    ? LootRows.OrderByDescending(x => x.Quantity)
+                    : LootRows.OrderBy(x => x.Quantity)
+            };
+
+            return ordered.ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase).Take(maxItems);
+        }
+    }
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
         Title = $"BDO Loot Tracker — {VersionText}";
-        SourceInitialized += (_, _) => HideNativeTitleBarIcon();
+        SourceInitialized += MainWindow_SourceInitialized;
 
         _settings = _settingsService.Load();
         _database = new DatabaseService(_settings.DatabasePath);
@@ -201,8 +249,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _autoSaveTimer.Tick += (_, _) => AutoSaveCurrentSession();
 
         Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
+            UnregisterGlobalHotkeys();
+            if (_hwndSource != null)
+                _hwndSource.RemoveHook(WndProc);
+
+            if (_trayIcon != null)
+            {
+                _trayIcon.Visible = false;
+                _trayIcon.Dispose();
+                _trayIcon = null;
+            }
+
             StopSession(saveSession: true);
             CloseOverlayWindow();
             _captureService.Dispose();
@@ -215,6 +275,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshHeaderContext();
         ApplyLootPanelState(_settings.LootPanelCollapsed, persist: false);
         ApplyOverlayEnabled(_settings.OverlayEnabled, persist: false);
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(ShowWhatsNewIfNeeded));
         Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(CheckDatabaseAtStartup));
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(async () =>
         {
@@ -470,6 +531,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         row.Quantity += quantity;
+        row.LastLootedUtc = DateTime.UtcNow;
+        OnPropertyChanged(nameof(OverlayLootRows));
         EvaluateSpotDetection(itemId, row.IsTrash);
         RefreshMetrics();
     }
@@ -572,30 +635,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        var window = new SettingsWindow(_settingsService)
-        {
-            Owner = this
-        };
-        window.MoveOverlayRequested += (_, _) => BeginOverlayPlacement(window);
+        // Global hotkeys can otherwise consume the same keys the user is trying
+        // to enter into the Keybind fields inside the modal Settings window.
+        UnregisterGlobalHotkeys();
 
-        if (window.ShowDialog() == true)
+        try
         {
-            _settings = _settingsService.Load();
-            EnsureDatabaseServicesMatchSettings(forceRecreateIconCache: true);
-            ReloadIgnoredItems(applyToCurrentSession: true);
-            RefreshVisibleLootDefinitions();
-            RefreshHeaderContext();
-            OnPropertyChanged(nameof(OverlayLootRows));
-            RefreshOverlayWindowFromSettings();
-            StatusText = $"Settings saved • {_settings.Region}";
+            var window = new SettingsWindow(_settingsService)
+            {
+                Owner = this
+            };
+            window.MoveOverlayRequested += (_, _) => BeginOverlayPlacement(window);
+            window.OverlayResetRequested += (_, _) =>
+            {
+                _settings = _settingsService.Load();
+                OnPropertyChanged(nameof(OverlayLootRows));
+                RefreshOverlayWindowFromSettings();
+            };
+
+            if (window.ShowDialog() == true)
+            {
+                _settings = _settingsService.Load();
+                EnsureDatabaseServicesMatchSettings(forceRecreateIconCache: true);
+                ReloadIgnoredItems(applyToCurrentSession: true);
+                RefreshVisibleLootDefinitions();
+                RefreshHeaderContext();
+                OnPropertyChanged(nameof(OverlayLootRows));
+                RefreshOverlayWindowFromSettings();
+                StatusText = $"Settings saved • {_settings.Region}";
+            }
+            else
+            {
+                // Overlay placement/reset is saved independently from the Settings
+                // Save button. Restore the normal overlay even when the rest of
+                // Settings is cancelled.
+                _settings = _settingsService.Load();
+                OnPropertyChanged(nameof(OverlayLootRows));
+                RefreshOverlayWindowFromSettings();
+            }
         }
-        else
+        finally
         {
-            // Overlay placement is saved independently from the Settings Save button.
-            // Restore the normal overlay even when the rest of Settings is cancelled.
-            _settings = _settingsService.Load();
-            OnPropertyChanged(nameof(OverlayLootRows));
-            RefreshOverlayWindowFromSettings();
+            ApplyGlobalHotkeys(showErrors: true);
         }
     }
 
@@ -917,6 +998,271 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
 
         editor.Show();
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        HideNativeTitleBarIcon();
+
+        _mainHwnd = new WindowInteropHelper(this).Handle;
+        _hwndSource = HwndSource.FromHwnd(_mainHwnd);
+        _hwndSource?.AddHook(WndProc);
+        ApplyGlobalHotkeys(showErrors: false);
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != WmHotKey)
+            return IntPtr.Zero;
+
+        int id = wParam.ToInt32();
+        if (id == StartStopHotkeyId)
+        {
+            if (_captureService.IsRunning)
+                StopSession(saveSession: true);
+            else
+                Start_Click(StartButton, new RoutedEventArgs());
+
+            handled = true;
+        }
+        else if (id == OverlayHotkeyId)
+        {
+            ApplyOverlayEnabled(!_settings.OverlayEnabled, persist: true);
+            handled = true;
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private void ApplyGlobalHotkeys(bool showErrors)
+    {
+        if (_mainHwnd == IntPtr.Zero)
+            return;
+
+        UnregisterGlobalHotkeys();
+        _settings = _settingsService.Load();
+
+        var errors = new List<string>();
+        RegisterConfiguredHotkey(_settings.StartStopHotkey, StartStopHotkeyId, "Start / Stop Tracking", errors);
+        RegisterConfiguredHotkey(_settings.OverlayHotkey, OverlayHotkeyId, "Toggle Overlay", errors);
+
+        if (errors.Count == 0)
+            return;
+
+        StatusText = errors[0];
+        if (showErrors)
+        {
+            MessageBox.Show(
+                string.Join("\n", errors),
+                "Keybinds",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+    }
+
+    private void RegisterConfiguredHotkey(string? hotkey, int id, string label, List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(hotkey) || string.Equals(hotkey.Trim(), "None", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!TryParseHotkey(hotkey, out uint modifiers, out uint virtualKey))
+        {
+            errors.Add($"{label}: invalid shortcut '{hotkey}'.");
+            return;
+        }
+
+        if (!RegisterHotKey(_mainHwnd, id, modifiers | ModNoRepeat, virtualKey))
+            errors.Add($"{label}: shortcut '{hotkey}' is already in use.");
+    }
+
+    private void UnregisterGlobalHotkeys()
+    {
+        if (_mainHwnd == IntPtr.Zero)
+            return;
+
+        UnregisterHotKey(_mainHwnd, StartStopHotkeyId);
+        UnregisterHotKey(_mainHwnd, OverlayHotkeyId);
+    }
+
+    private static bool TryParseHotkey(string value, out uint modifiers, out uint virtualKey)
+    {
+        modifiers = 0;
+        virtualKey = 0;
+
+        string[] parts = value.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+            return false;
+
+        string keyText = parts[^1];
+        foreach (string part in parts[..^1])
+        {
+            switch (part.ToUpperInvariant())
+            {
+                case "CTRL":
+                case "CONTROL":
+                    modifiers |= ModControl;
+                    break;
+                case "ALT":
+                    modifiers |= ModAlt;
+                    break;
+                case "SHIFT":
+                    modifiers |= ModShift;
+                    break;
+                case "WIN":
+                case "WINDOWS":
+                    modifiers |= ModWin;
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        try
+        {
+            var converter = new KeyConverter();
+            object? converted = converter.ConvertFromString(keyText);
+            if (converted is not Key key || key == Key.None)
+                return false;
+
+            virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
+            return virtualKey != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_allowClose)
+            return;
+
+        e.Cancel = true;
+        if (_closePromptOpen)
+            return;
+
+        _closePromptOpen = true;
+        try
+        {
+            var dialog = new CloseChoiceWindow { Owner = this };
+            dialog.ShowDialog();
+
+            switch (dialog.Choice)
+            {
+                case CloseChoice.Exit:
+                    _allowClose = true;
+                    Dispatcher.BeginInvoke(new Action(Close));
+                    break;
+                case CloseChoice.Tray:
+                    HideToTray();
+                    break;
+                case CloseChoice.Cancel:
+                default:
+                    break;
+            }
+        }
+        finally
+        {
+            _closePromptOpen = false;
+        }
+    }
+
+    private void EnsureTrayIcon()
+    {
+        if (_trayIcon != null)
+            return;
+
+        _trayIcon = new Forms.NotifyIcon
+        {
+            Text = "BDO Loot Tracker",
+            Visible = false
+        };
+
+        try
+        {
+            string? exePath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(exePath))
+                _trayIcon.Icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+        }
+        catch
+        {
+            // The tray icon can still exist without a custom icon if Windows
+            // cannot extract the executable icon for some reason.
+        }
+
+        var menu = new Forms.ContextMenuStrip();
+        var openItem = new Forms.ToolStripMenuItem("Open BDO Loot Tracker");
+        openItem.Click += (_, _) => Dispatcher.BeginInvoke(new Action(RestoreFromTray));
+        var exitItem = new Forms.ToolStripMenuItem("Exit");
+        exitItem.Click += (_, _) => Dispatcher.BeginInvoke(new Action(ExitFromTray));
+        menu.Items.Add(openItem);
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add(exitItem);
+        _trayIcon.ContextMenuStrip = menu;
+        _trayIcon.DoubleClick += (_, _) => Dispatcher.BeginInvoke(new Action(RestoreFromTray));
+    }
+
+    private void HideToTray()
+    {
+        EnsureTrayIcon();
+        if (_trayIcon != null)
+            _trayIcon.Visible = true;
+
+        ShowInTaskbar = false;
+        Hide();
+    }
+
+    private void RestoreFromTray()
+    {
+        ShowInTaskbar = true;
+        Show();
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+        Activate();
+        Focus();
+
+        if (_trayIcon != null)
+            _trayIcon.Visible = false;
+    }
+
+    private void ExitFromTray()
+    {
+        _allowClose = true;
+        Close();
+    }
+
+    private void ShowWhatsNewIfNeeded()
+    {
+        try
+        {
+            string currentVersion = VersionText.TrimStart('v', 'V');
+            _settings = _settingsService.Load();
+
+            if (string.Equals(_settings.LastSeenChangelogVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var entry = new ChangelogService().GetForVersion(currentVersion);
+            if (entry == null)
+                return;
+
+            var window = new WhatsNewWindow(currentVersion, entry)
+            {
+                Owner = this
+            };
+            window.ShowDialog();
+
+            // The dialog is informational; closing it with X also counts as seen
+            // so it does not annoy the user on every application start.
+            var latest = _settingsService.Load();
+            latest.LastSeenChangelogVersion = currentVersion;
+            _settingsService.Save(latest);
+            _settings = latest;
+        }
+        catch
+        {
+            // Changelog presentation must never block the tracker from starting.
+        }
     }
 
     private void ToggleLootPanel_Click(object sender, RoutedEventArgs e)

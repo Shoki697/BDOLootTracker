@@ -5,11 +5,12 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <StartupObject>BDOLootTracker.App</StartupObject>
     <ApplicationIcon>Resources\AppIcon.ico</ApplicationIcon>
-    <Version>0.10.4</Version>
-    <AssemblyVersion>0.10.4.0</AssemblyVersion>
-    <FileVersion>0.10.4.0</FileVersion>
+    <Version>0.12.0</Version>
+    <AssemblyVersion>0.12.0.0</AssemblyVersion>
+    <FileVersion>0.12.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,9 +19,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- UseWindowsForms is only needed for the tray icon. Remove its implicit
+         global usings so WPF types such as Window/Application remain unambiguous. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+
+  <ItemGroup>
     <Resource Include="Resources\AppIcon.png" />
     <Resource Include="Resources\AppIcon.ico" />
     <Resource Include="Resources\HeaderLogo.png" />
+    <EmbeddedResource Include="Resources\changelog.json" />
   </ItemGroup>
 
   <ItemGroup>

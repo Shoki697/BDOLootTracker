@@ -177,19 +177,28 @@ public partial class OverlayWindow : Window
         if (!_editMode)
             return;
 
+        // Commit the final WPF layout values directly when Save is pressed.
+        // ActualWidth/ActualHeight avoid persisting a stale requested size while a
+        // drag/resize layout pass is still finishing. KeepWindowOnVirtualDesktop
+        // also prevents a saved position from becoming unreachable.
+        KeepWindowOnVirtualDesktop();
+
+        double savedWidth = double.IsFinite(ActualWidth) && ActualWidth > 0 ? ActualWidth : Width;
+        double savedHeight = savedWidth / _aspectRatio;
+
         var latest = _settingsService.Load();
         latest.OverlayLeft = Left;
         latest.OverlayTop = Top;
 
         if (_mode == "Compact")
         {
-            latest.OverlayCompactWidth = Width;
-            latest.OverlayCompactHeight = Height;
+            latest.OverlayCompactWidth = savedWidth;
+            latest.OverlayCompactHeight = savedHeight;
         }
         else
         {
-            latest.OverlayDetailedWidth = Width;
-            latest.OverlayDetailedHeight = Height;
+            latest.OverlayDetailedWidth = savedWidth;
+            latest.OverlayDetailedHeight = savedHeight;
         }
 
         _settingsService.Save(latest);

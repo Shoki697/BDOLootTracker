@@ -202,10 +202,16 @@ public sealed class CaptureService : IDisposable
     private sealed class BdoLootParser
     {
         private static readonly byte[] LootSignature = { 0x00, 0x01, 0x00, 0xE0 };
+        // Observed in controlled Storage / Transaction Maid withdrawals immediately
+        // before the inventory-update signature. This keeps the stable loot parser
+        // intact while suppressing only the tested transfer form.
+        private static readonly byte[] StorageTransferPrefix = { 0x06, 0x00, 0x00, 0xE7, 0x12, 0x02 };
         private const int MinimumLootDataLength = 42;
         private const uint MaxReasonableItemId = 10_000_000;
 
         private readonly List<byte> _buffer = new();
+        private bool _candidatePending;
+        private bool _suppressCurrentCandidate;
 
         public event Action<uint, ulong>? LootReceived;
 
@@ -226,10 +232,19 @@ public sealed class CaptureService : IDisposable
 
                 if (signaturePosition < 0)
                 {
-                    int keepBytes = LootSignature.Length - 1;
+                    // Keep enough trailing bytes to recognize both a split loot signature and
+                    // the tested Storage/Maid prefix when a TCP payload boundary falls
+                    // between the prefix and the signature.
+                    int keepBytes = StorageTransferPrefix.Length + LootSignature.Length - 1;
                     if (_buffer.Count > keepBytes)
                         _buffer.RemoveRange(0, _buffer.Count - keepBytes);
                     return;
+                }
+
+                if (!_candidatePending)
+                {
+                    _suppressCurrentCandidate = IsStorageTransferPrefix(signaturePosition);
+                    _candidatePending = true;
                 }
 
                 if (signaturePosition > 0)
@@ -238,7 +253,10 @@ public sealed class CaptureService : IDisposable
                 if (_buffer.Count < MinimumLootDataLength)
                     return;
 
-                ParseLootCandidate();
+                ParseLootCandidate(_suppressCurrentCandidate);
+
+                _candidatePending = false;
+                _suppressCurrentCandidate = false;
 
                 // A stabil tesztverzió logikája: csak a 4 byte-os signature-t lépjük át,
                 // így közeli loot eseményt sem tudunk kihagyni.
@@ -263,7 +281,22 @@ public sealed class CaptureService : IDisposable
             return -1;
         }
 
-        private void ParseLootCandidate()
+        private bool IsStorageTransferPrefix(int signaturePosition)
+        {
+            if (signaturePosition < StorageTransferPrefix.Length)
+                return false;
+
+            int start = signaturePosition - StorageTransferPrefix.Length;
+            for (int i = 0; i < StorageTransferPrefix.Length; i++)
+            {
+                if (_buffer[start + i] != StorageTransferPrefix[i])
+                    return false;
+            }
+
+            return true;
+        }
+
+        private void ParseLootCandidate(bool suppress)
         {
             Span<byte> itemBytes = stackalloc byte[4];
             Span<byte> quantityBytes = stackalloc byte[8];
@@ -283,7 +316,8 @@ public sealed class CaptureService : IDisposable
             if (quantity == 0 || quantity > 10_000_000_000UL)
                 return;
 
-            LootReceived?.Invoke(itemId, quantity);
+            if (!suppress)
+                LootReceived?.Invoke(itemId, quantity);
         }
     }
 }
