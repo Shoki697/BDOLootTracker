@@ -1,8 +1,8 @@
 using System.IO;
+using System.Net.Http;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
-using System.Net.Http;
 using BDOLootTracker.Models;
 
 namespace BDOLootTracker.Services;
@@ -39,12 +39,18 @@ public sealed class ParserProfileService : IDisposable
         _sampleVersionPath = Path.Combine(_folder, "sample-version.txt");
     }
 
-
+    /// <summary>
+    /// Local-only. This method intentionally performs no network access and is
+    /// safe to call during application startup.
+    /// </summary>
     public ParserProfile LoadActiveProfile(out string source)
     {
         ParserProfile embedded = LoadEmbeddedProfile();
         ParserProfile? local = TryLoadProfileFile(_activeProfilePath);
 
+        // A newer application release may contain a parser hotfix that is newer
+        // than a profile cached by an older install. Prefer that built-in profile
+        // even without any network access.
         if (local == null || CompareProfileVersions(embedded.ProfileVersion, local.ProfileVersion) > 0)
         {
             source = "Built-in fallback";
@@ -61,6 +67,11 @@ public sealed class ParserProfileService : IDisposable
     public ParserProfile? LoadLastKnownGood()
         => TryLoadProfileFile(_lastKnownGoodPath);
 
+    /// <summary>
+    /// Called when START is pressed. Checks GitHub for a newer JSON profile,
+    /// validates its SHA-256, and activates it. Failures never prevent a session
+    /// from starting with the existing local profile.
+    /// </summary>
     public async Task<ParserDiagnosticsResult> EnsureLatestProfileAsync(CancellationToken cancellationToken = default)
     {
         ParserProfile active = LoadActiveProfile(out string source);
@@ -117,6 +128,10 @@ public sealed class ParserProfileService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Explicit Diagnostics action. It checks remote metadata but does not
+    /// modify the active profile.
+    /// </summary>
     public async Task<ParserDiagnosticsResult> RunDiagnosticsAsync(CancellationToken cancellationToken = default)
     {
         ParserProfile active = LoadActiveProfile(out string source);
@@ -163,6 +178,11 @@ public sealed class ParserProfileService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Explicit repair action. Re-downloads the current remote profile even if
+    /// the version number matches, validates it, stores it as last-known-good,
+    /// and downloads a newer pcapng diagnostic sample when the manifest offers one.
+    /// </summary>
     public async Task<ParserDiagnosticsResult> AutoRepairAsync(CancellationToken cancellationToken = default)
     {
         ParserProfile before = LoadActiveProfile(out string source);

@@ -81,5 +81,22 @@
         "description": "The parser manifest can advertise a newer pcapng sample for larger protocol changes. Auto Repair can cache the sample for diagnostics while JSON profiles remain non-executable data."
       }
     ]
+  },
+  "0.14.1": {
+    "title": "What's New",
+    "changes": [
+      {
+        "title": "Faster live update detection",
+        "description": "While the tracker is running, it now checks for a newer GitHub release every two minutes. The bottom-right update button can appear without restarting the application and continues to work while the app is in the tray."
+      },
+      {
+        "title": "Reliable What's New after updates",
+        "description": "Before Velopack restarts, the target version is stored in both settings and a durable pending-update marker. What's New is shown only after the main window has rendered, and the marker is cleared only after the dialog was successfully displayed."
+      },
+      {
+        "title": "Changelog recovery fallback",
+        "description": "If a build is missing its detailed changelog entry, the tracker still confirms that the new version was installed instead of silently showing nothing. Failed changelog display attempts remain pending and retry on the next start."
+      }
+    ]
   }
 }

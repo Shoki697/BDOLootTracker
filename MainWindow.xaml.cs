@@ -56,7 +56,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static readonly TimeSpan MarketMaxAge = TimeSpan.FromDays(7);
     private static readonly TimeSpan AutoSaveInterval = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromMinutes(2);
     private const double ExpandedMinWidth = 980;
     // Compact mode should end almost exactly at the right edge of the
     // left session cards (440 px + window/content margins).
@@ -65,6 +65,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private readonly SettingsService _settingsService = new();
     private readonly AppUpdateService _appUpdateService = new();
+    private readonly UpdateChangelogMarkerService _updateChangelogMarkerService = new();
     private readonly ParserProfileService _parserProfileService = new();
     private readonly CaptureService _captureService = new();
     private DatabaseService _database;
@@ -288,6 +289,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _updateCheckTimer.Tick += async (_, _) => await CheckForUpdateAvailabilityAsync();
 
         Loaded += MainWindow_Loaded;
+        ContentRendered += MainWindow_ContentRendered;
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
@@ -317,7 +319,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshHeaderContext();
         ApplyLootPanelState(_settings.LootPanelCollapsed, persist: false);
         ApplyOverlayEnabled(_settings.OverlayEnabled, persist: false);
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(ShowWhatsNewIfNeeded));
         Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(CheckDatabaseAtStartup));
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(async () =>
         {
@@ -325,6 +326,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _updateCheckTimer.Start();
         }));
         UpdateGarmothUploadButtonState();
+    }
+
+    private void MainWindow_ContentRendered(object? sender, EventArgs e)
+    {
+        // Changelog UI is deliberately delayed until the main window has actually
+        // rendered. Velopack can restart the application very quickly after applying
+        // an update; showing a modal window from Loaded proved unreliable there.
+        ContentRendered -= MainWindow_ContentRendered;
+        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(ShowWhatsNewIfNeeded));
     }
 
     private async Task CheckForUpdateAvailabilityAsync()
@@ -335,14 +345,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _isCheckingForUpdate = true;
         try
         {
-            _availableUpdate = await _appUpdateService.CheckForAvailableUpdateAsync();
-            if (_availableUpdate == null)
+            AppUpdateService.AvailableUpdateInfo? detectedUpdate =
+                await _appUpdateService.CheckForAvailableUpdateAsync();
+
+            if (detectedUpdate == null)
             {
-                UpdateBannerText = string.Empty;
-                UpdateBannerVisibility = Visibility.Collapsed;
+                // Once an update has been found, keep its banner visible until the
+                // user installs it or the application restarts. A temporary GitHub
+                // failure on a later two-minute check should not make it disappear.
+                if (_availableUpdate == null)
+                {
+                    UpdateBannerText = string.Empty;
+                    UpdateBannerVisibility = Visibility.Collapsed;
+                }
+
                 return;
             }
 
+            _availableUpdate = detectedUpdate;
             UpdateBannerText = $"Update available • v{_availableUpdate.NewVersion}";
             UpdateBannerVisibility = Visibility.Visible;
         }
@@ -407,6 +427,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateBannerText = "Downloading update...";
         StatusText = "Downloading update...";
 
+        // Two independent markers are written before Velopack takes over. The
+        // settings value keeps backwards compatibility, while the small file marker
+        // survives updater restarts and is only removed after What's New was shown.
+        _updateChangelogMarkerService.WritePending(_availableUpdate.NewVersion);
+
         var latest = _settingsService.Load();
         latest.PendingChangelogVersion = _availableUpdate.NewVersion;
         _settingsService.Save(latest);
@@ -418,6 +443,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            _updateChangelogMarkerService.ClearPending();
+
             var failed = _settingsService.Load();
             failed.PendingChangelogVersion = string.Empty;
             _settingsService.Save(failed);
@@ -1684,10 +1711,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string currentVersion = VersionText.TrimStart('v', 'V');
             _settings = _settingsService.Load();
 
-            bool forcedByUpdater = string.Equals(
+            string markerVersion = _updateChangelogMarkerService.ReadPendingVersion();
+            bool forcedByFileMarker = string.Equals(
+                markerVersion,
+                currentVersion,
+                StringComparison.OrdinalIgnoreCase);
+
+            bool forcedBySettings = string.Equals(
                 _settings.PendingChangelogVersion,
                 currentVersion,
                 StringComparison.OrdinalIgnoreCase);
+
+            bool forcedByUpdater = forcedByFileMarker || forcedBySettings;
 
             if (!forcedByUpdater &&
                 string.Equals(_settings.LastSeenChangelogVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
@@ -1695,28 +1730,58 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return;
             }
 
-            var entry = new ChangelogService().GetForVersion(currentVersion);
-            if (entry == null)
-                return;
+            // An update confirmation should never disappear just because a release
+            // accidentally shipped without a matching changelog.json entry.
+            var entry = new ChangelogService().GetForVersion(currentVersion)
+                        ?? CreateFallbackChangelog(currentVersion, forcedByUpdater);
 
             var window = new WhatsNewWindow(currentVersion, entry)
             {
                 Owner = this
             };
+
             window.ShowDialog();
 
-            // The dialog is informational; closing it with X also counts as seen
-            // so it does not annoy the user on every application start.
+            // Only acknowledge the version after the dialog was successfully shown.
+            // If window creation/display throws, both pending markers remain and the
+            // next application start retries instead of silently losing the changelog.
             var latest = _settingsService.Load();
             latest.LastSeenChangelogVersion = currentVersion;
-            latest.PendingChangelogVersion = string.Empty;
+            if (forcedBySettings)
+                latest.PendingChangelogVersion = string.Empty;
             _settingsService.Save(latest);
             _settings = latest;
+
+            if (forcedByFileMarker)
+                _updateChangelogMarkerService.ClearPending();
         }
-        catch
+        catch (Exception ex)
         {
-            // Changelog presentation must never block the tracker from starting.
+            // Never block startup, but also do not consume the pending markers.
+            // This leaves the changelog eligible for another attempt next launch.
+            Debug.WriteLine($"Unable to show What's New: {ex}");
+            StatusText = "What's New could not open; it will retry next start.";
         }
+    }
+
+    private static ChangelogEntry CreateFallbackChangelog(string currentVersion, bool installedByUpdater)
+    {
+        string description = installedByUpdater
+            ? "The update was installed successfully. Detailed changelog information is not available for this build."
+            : "This version is running successfully. Detailed changelog information is not available for this build.";
+
+        return new ChangelogEntry
+        {
+            Title = "What's New",
+            Changes = new List<ChangelogChange>
+            {
+                new()
+                {
+                    Title = $"BDO Loot Tracker v{currentVersion}",
+                    Description = description
+                }
+            }
+        };
     }
 
     private void ToggleLootPanel_Click(object sender, RoutedEventArgs e)
