@@ -56,6 +56,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static readonly TimeSpan MarketMaxAge = TimeSpan.FromDays(7);
     private static readonly TimeSpan AutoSaveInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromMinutes(30);
     private const double ExpandedMinWidth = 980;
     // Compact mode should end almost exactly at the right edge of the
     // left session cards (440 px + window/content margins).
@@ -66,20 +67,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly AppUpdateService _appUpdateService = new();
     private readonly CaptureService _captureService = new();
     private DatabaseService _database;
+    private GarmothUploadService _garmothUploadService;
     private IconCacheService _iconCache;
     private AppSettings _settings;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _autoSaveTimer;
+    private readonly DispatcherTimer _updateCheckTimer;
     private OverlayWindow? _overlayWindow;
     private Forms.NotifyIcon? _trayIcon;
     private HwndSource? _hwndSource;
     private IntPtr _mainHwnd;
     private bool _allowClose;
     private bool _closePromptOpen;
+    private bool _isGarmothUploading;
+    private bool _isCheckingForUpdate;
+    private bool _isInstallingUpdate;
+    private AppUpdateService.AvailableUpdateInfo? _availableUpdate;
 
     private readonly Dictionary<uint, LootRowViewModel> _rowsById = new();
     private readonly Dictionary<uint, ulong> _sessionLoot = new();
     private HashSet<uint> _ignoredItemIds = new();
+    private HashSet<uint> _garmothKnownItemIds = new();
 
     private DateTime? _sessionStartedUtc;
     private TimeSpan _stoppedElapsed = TimeSpan.Zero;
@@ -122,6 +130,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Visibility _compactHeaderVisibility = Visibility.Collapsed;
     private Brush _overlayButtonBackground = new SolidColorBrush(Color.FromRgb(20, 32, 42));
     private Brush _overlayButtonBorderBrush = new SolidColorBrush(Color.FromRgb(42, 62, 77));
+    private string _updateBannerText = string.Empty;
+    private Visibility _updateBannerVisibility = Visibility.Collapsed;
 
     public ObservableCollection<LootRowViewModel> LootRows { get; } = new();
     public string VersionText { get; } = GetVersionText();
@@ -198,32 +208,48 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public Visibility CompactHeaderVisibility { get => _compactHeaderVisibility; private set => SetField(ref _compactHeaderVisibility, value); }
     public Brush OverlayButtonBackground { get => _overlayButtonBackground; private set => SetField(ref _overlayButtonBackground, value); }
     public Brush OverlayButtonBorderBrush { get => _overlayButtonBorderBrush; private set => SetField(ref _overlayButtonBorderBrush, value); }
+    public string UpdateBannerText { get => _updateBannerText; private set => SetField(ref _updateBannerText, value); }
+    public Visibility UpdateBannerVisibility { get => _updateBannerVisibility; private set => SetField(ref _updateBannerVisibility, value); }
+
+    public IEnumerable<LootRowViewModel> MainLootRows => GetSortedLootRows();
+
     public IEnumerable<LootRowViewModel> OverlayLootRows
     {
         get
         {
             int maxItems = Math.Clamp(_settings?.OverlayMaxDisplayedItems ?? 8, 1, 20);
-            string sortBy = _settings?.OverlaySortBy ?? "Quantity";
-            bool descending = _settings?.OverlaySortDescending ?? true;
-
-            IOrderedEnumerable<LootRowViewModel> ordered = sortBy switch
-            {
-                "Last Looted" => descending
-                    ? LootRows.OrderByDescending(x => x.LastLootedUtc)
-                    : LootRows.OrderBy(x => x.LastLootedUtc),
-                "Total Value" => descending
-                    ? LootRows.OrderByDescending(x => x.TotalSilver)
-                    : LootRows.OrderBy(x => x.TotalSilver),
-                "Unit Price" => descending
-                    ? LootRows.OrderByDescending(x => x.UnitPrice)
-                    : LootRows.OrderBy(x => x.UnitPrice),
-                _ => descending
-                    ? LootRows.OrderByDescending(x => x.Quantity)
-                    : LootRows.OrderBy(x => x.Quantity)
-            };
-
-            return ordered.ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase).Take(maxItems);
+            return GetSortedLootRows().Take(maxItems);
         }
+    }
+
+    private IOrderedEnumerable<LootRowViewModel> GetSortedLootRows()
+    {
+        string sortBy = _settings?.OverlaySortBy ?? "Quantity";
+        bool descending = _settings?.OverlaySortDescending ?? true;
+
+        IOrderedEnumerable<LootRowViewModel> ordered = sortBy switch
+        {
+            "Last Looted" => descending
+                ? LootRows.OrderByDescending(x => x.LastLootedUtc)
+                : LootRows.OrderBy(x => x.LastLootedUtc),
+            "Total Value" => descending
+                ? LootRows.OrderByDescending(x => x.TotalSilver)
+                : LootRows.OrderBy(x => x.TotalSilver),
+            "Unit Price" => descending
+                ? LootRows.OrderByDescending(x => x.UnitPrice)
+                : LootRows.OrderBy(x => x.UnitPrice),
+            _ => descending
+                ? LootRows.OrderByDescending(x => x.Quantity)
+                : LootRows.OrderBy(x => x.Quantity)
+        };
+
+        return ordered.ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void NotifyLootOrderingChanged()
+    {
+        OnPropertyChanged(nameof(MainLootRows));
+        OnPropertyChanged(nameof(OverlayLootRows));
     }
 
     public MainWindow()
@@ -236,7 +262,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settings = _settingsService.Load();
         _database = new DatabaseService(_settings.DatabasePath);
         _iconCache = new IconCacheService(_database);
+        _garmothUploadService = new GarmothUploadService(_database);
         ReloadIgnoredItems(applyToCurrentSession: false);
+        ReloadGarmothLootFilter();
 
         _captureService.LootReceived += CaptureService_LootReceived;
         _captureService.StatusChanged += CaptureService_StatusChanged;
@@ -247,6 +275,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         _autoSaveTimer = new DispatcherTimer { Interval = AutoSaveInterval };
         _autoSaveTimer.Tick += (_, _) => AutoSaveCurrentSession();
+
+        _updateCheckTimer = new DispatcherTimer { Interval = UpdateCheckInterval };
+        _updateCheckTimer.Tick += async (_, _) => await CheckForUpdateAvailabilityAsync();
 
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
@@ -263,9 +294,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _trayIcon = null;
             }
 
+            _updateCheckTimer.Stop();
             StopSession(saveSession: true);
             CloseOverlayWindow();
             _captureService.Dispose();
+            _garmothUploadService.Dispose();
             _iconCache.Dispose();
         };
     }
@@ -279,9 +312,121 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(CheckDatabaseAtStartup));
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(async () =>
         {
-            // Silent unless an update is available. Failures never block startup.
-            await _appUpdateService.CheckForUpdatesAsync(this);
+            await CheckForUpdateAvailabilityAsync();
+            _updateCheckTimer.Start();
         }));
+        UpdateGarmothUploadButtonState();
+    }
+
+    private async Task CheckForUpdateAvailabilityAsync()
+    {
+        if (_isCheckingForUpdate || _isInstallingUpdate)
+            return;
+
+        _isCheckingForUpdate = true;
+        try
+        {
+            _availableUpdate = await _appUpdateService.CheckForAvailableUpdateAsync();
+            if (_availableUpdate == null)
+            {
+                UpdateBannerText = string.Empty;
+                UpdateBannerVisibility = Visibility.Collapsed;
+                return;
+            }
+
+            UpdateBannerText = $"Update available • v{_availableUpdate.NewVersion}";
+            UpdateBannerVisibility = Visibility.Visible;
+        }
+        finally
+        {
+            _isCheckingForUpdate = false;
+        }
+    }
+
+    private async void UpdateNow_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isInstallingUpdate)
+            return;
+
+        if (_isGarmothUploading)
+        {
+            MessageBox.Show(
+                "Wait for the Garmoth upload to finish before updating the application.",
+                "BDO Loot Tracker Update",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        if (_availableUpdate == null)
+        {
+            await CheckForUpdateAvailabilityAsync();
+            if (_availableUpdate == null)
+            {
+                MessageBox.Show(
+                    "No newer version is currently available.",
+                    "BDO Loot Tracker Update",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+        }
+
+        string notes = string.IsNullOrWhiteSpace(_availableUpdate.ReleaseNotes)
+            ? string.Empty
+            : $"\n\nRelease notes:\n{_availableUpdate.ReleaseNotes}";
+
+        MessageBoxResult result = MessageBox.Show(
+            $"Update BDO Loot Tracker now?\n\n" +
+            $"Installed: v{_availableUpdate.CurrentVersion}\n" +
+            $"Available: v{_availableUpdate.NewVersion}" +
+            notes +
+            "\n\nThe tracker will restart automatically after the update.",
+            "Update Available",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information);
+
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        if (_captureService.IsRunning)
+            StopSession(saveSession: true);
+
+        _isInstallingUpdate = true;
+        UpdateNowButton.IsEnabled = false;
+        UpdateGarmothUploadButtonState();
+        UpdateBannerText = "Downloading update...";
+        StatusText = "Downloading update...";
+
+        var latest = _settingsService.Load();
+        latest.PendingChangelogVersion = _availableUpdate.NewVersion;
+        _settingsService.Save(latest);
+        _settings = latest;
+
+        try
+        {
+            await _appUpdateService.InstallLatestUpdateAsync();
+        }
+        catch (Exception ex)
+        {
+            var failed = _settingsService.Load();
+            failed.PendingChangelogVersion = string.Empty;
+            _settingsService.Save(failed);
+            _settings = failed;
+
+            _isInstallingUpdate = false;
+            UpdateNowButton.IsEnabled = true;
+            UpdateGarmothUploadButtonState();
+            StatusText = "Update failed";
+
+            MessageBox.Show(
+                ex.Message,
+                "Update Failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+
+            await CheckForUpdateAvailabilityAsync();
+        }
     }
 
     private void CheckDatabaseAtStartup()
@@ -363,9 +508,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             EnsureDatabaseServicesMatchSettings();
             ReloadIgnoredItems(applyToCurrentSession: false);
+            ReloadGarmothLootFilter();
 
             LootRows.Clear();
-            OnPropertyChanged(nameof(OverlayLootRows));
+            NotifyLootOrderingChanged();
             _rowsById.Clear();
             _sessionLoot.Clear();
             ResetSpotDetection();
@@ -406,6 +552,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             StartButton.IsEnabled = false;
             StopButton.IsEnabled = true;
+            UpdateGarmothUploadButtonState();
             string characterStatus = selectedClass == null
                 ? string.Empty
                 : $" • {className}{(string.IsNullOrWhiteSpace(spec) ? string.Empty : $" {spec}")}";
@@ -460,6 +607,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _sessionStartedUtc = null;
         StartButton.IsEnabled = true;
         StopButton.IsEnabled = false;
+        UpdateGarmothUploadButtonState();
         RefreshMetrics();
     }
 
@@ -505,6 +653,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (_ignoredItemIds.Contains(itemId))
             return;
 
+        // Optional Garmoth-only filter. If the local drop cache is unavailable,
+        // fail open rather than silently losing an entire session.
+        if (_settings.OnlyTrackGarmothItems &&
+            _garmothKnownItemIds.Count > 0 &&
+            !_garmothKnownItemIds.Contains(itemId))
+        {
+            return;
+        }
+
         if (!_sessionLoot.TryAdd(itemId, quantity))
             _sessionLoot[itemId] += quantity;
 
@@ -524,7 +681,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             _rowsById[itemId] = row;
             LootRows.Add(row);
-            OnPropertyChanged(nameof(OverlayLootRows));
+            NotifyLootOrderingChanged();
 
             if (string.IsNullOrWhiteSpace(row.IconPath) || !File.Exists(row.IconPath))
                 _ = EnsureRowIconAsync(row);
@@ -532,7 +689,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         row.Quantity += quantity;
         row.LastLootedUtc = DateTime.UtcNow;
-        OnPropertyChanged(nameof(OverlayLootRows));
+        NotifyLootOrderingChanged();
         EvaluateSpotDetection(itemId, row.IsTrash);
         RefreshMetrics();
     }
@@ -604,6 +761,159 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.BeginInvoke(() => StatusText = $"Capture error: {ex.Message}");
     }
 
+    private void UpdateGarmothUploadButtonState()
+    {
+        if (_isGarmothUploading || _isInstallingUpdate)
+        {
+            MainGarmothUploadButton.IsEnabled = false;
+            MainGarmothUploadButton.Content = _isGarmothUploading ? "Uploading..." : "Update in progress...";
+            return;
+        }
+
+        MainGarmothUploadButton.Content = "☁  UPLOAD LAST SESSION";
+
+        bool hasCompletedSession = false;
+        if (!_captureService.IsRunning)
+        {
+            try
+            {
+                hasCompletedSession = _database
+                    .GetSessions(_settings.ItemLanguage, hideIgnored: true, limit: 20)
+                    .Any(x => x.IsCompleted);
+            }
+            catch
+            {
+                hasCompletedSession = false;
+            }
+        }
+
+        MainGarmothUploadButton.IsEnabled = !_captureService.IsRunning && hasCompletedSession;
+    }
+
+    private async void UploadLastSessionToGarmoth_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isGarmothUploading)
+            return;
+
+        if (_captureService.IsRunning)
+        {
+            MessageBox.Show(
+                "Stop the active session before uploading to Garmoth.",
+                "Upload to Garmoth",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        _settings = _settingsService.Load();
+        EnsureDatabaseServicesMatchSettings();
+
+        if (string.IsNullOrWhiteSpace(_settings.GarmothApiKey))
+        {
+            MessageBox.Show(
+                "No Garmoth API token is saved. Open Settings → Garmoth, paste your API token, and press Save Changes.",
+                "Upload to Garmoth",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        SessionSummary? session;
+        IReadOnlyList<SessionLootHistoryRow> uploadLoot;
+
+        try
+        {
+            session = _database
+                .GetSessions(_settings.ItemLanguage, hideIgnored: true, limit: 50)
+                .FirstOrDefault(x => x.IsCompleted);
+
+            if (session == null)
+            {
+                MessageBox.Show(
+                    "There is no completed session to upload yet.",
+                    "Upload to Garmoth",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                UpdateGarmothUploadButtonState();
+                return;
+            }
+
+            uploadLoot = _database.GetSessionLoot(session.SessionId, _settings.ItemLanguage, hideIgnored: true);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Upload to Garmoth", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        if (uploadLoot.Count == 0)
+        {
+            MessageBox.Show(
+                "The most recent completed session has no uploadable loot items.",
+                "Upload to Garmoth",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        string classText = string.IsNullOrWhiteSpace(session.ClassName)
+            ? "—"
+            : string.IsNullOrWhiteSpace(session.Spec)
+                ? session.ClassName
+                : $"{session.ClassName} • {session.Spec}";
+
+        string spotText = string.IsNullOrWhiteSpace(session.SpotName) ? "—" : session.SpotName;
+
+        MessageBoxResult confirmation = MessageBox.Show(
+            $"Upload the most recent completed session to Garmoth?\n\n" +
+            $"Date: {session.DateText}\n" +
+            $"Spot: {spotText}\n" +
+            $"Class: {classText}\n" +
+            $"Duration: {session.DurationText}\n" +
+            $"Loot items: {uploadLoot.Count:N0}\n\n" +
+            "Uploading the same session more than once may create a duplicate entry on Garmoth.",
+            "Upload to Garmoth",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (confirmation != MessageBoxResult.Yes)
+            return;
+
+        _isGarmothUploading = true;
+        UpdateGarmothUploadButtonState();
+        StatusText = "Uploading session to Garmoth...";
+
+        try
+        {
+            await _garmothUploadService.UploadSessionAsync(
+                _settings.GarmothApiKey,
+                session,
+                uploadLoot,
+                CancellationToken.None);
+
+            StatusText = "Session uploaded to Garmoth successfully";
+            MessageBox.Show(
+                "Session uploaded to Garmoth successfully.",
+                "Upload to Garmoth",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Garmoth upload failed";
+            MessageBox.Show(
+                ex.Message,
+                "Garmoth upload error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            _isGarmothUploading = false;
+            UpdateGarmothUploadButtonState();
+        }
+    }
+
     private void Sessions_Click(object sender, RoutedEventArgs e)
     {
         // Ha fut session, előbb írjuk ki a legfrissebb snapshotot, hogy a history ablakban is látszódjon.
@@ -618,6 +928,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         // A history ablakból új Ignore tétel kerülhetett az adatbázisba.
         ReloadIgnoredItems(applyToCurrentSession: true);
+        UpdateGarmothUploadButtonState();
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
@@ -649,7 +960,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             window.OverlayResetRequested += (_, _) =>
             {
                 _settings = _settingsService.Load();
-                OnPropertyChanged(nameof(OverlayLootRows));
+                NotifyLootOrderingChanged();
                 RefreshOverlayWindowFromSettings();
             };
 
@@ -658,10 +969,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _settings = _settingsService.Load();
                 EnsureDatabaseServicesMatchSettings(forceRecreateIconCache: true);
                 ReloadIgnoredItems(applyToCurrentSession: true);
+                ReloadGarmothLootFilter();
                 RefreshVisibleLootDefinitions();
                 RefreshHeaderContext();
-                OnPropertyChanged(nameof(OverlayLootRows));
+                NotifyLootOrderingChanged();
                 RefreshOverlayWindowFromSettings();
+                UpdateGarmothUploadButtonState();
                 StatusText = $"Settings saved • {_settings.Region}";
             }
             else
@@ -670,8 +983,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 // Save button. Restore the normal overlay even when the rest of
                 // Settings is cancelled.
                 _settings = _settingsService.Load();
-                OnPropertyChanged(nameof(OverlayLootRows));
+                NotifyLootOrderingChanged();
                 RefreshOverlayWindowFromSettings();
+                UpdateGarmothUploadButtonState();
             }
         }
         finally
@@ -697,6 +1011,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void ReloadGarmothLootFilter()
+    {
+        try
+        {
+            _garmothKnownItemIds = _database.GetGarmothKnownLootItemIds();
+        }
+        catch
+        {
+            _garmothKnownItemIds = new HashSet<uint>();
+        }
+    }
+
     private void ReloadIgnoredItems(bool applyToCurrentSession)
     {
         try
@@ -719,7 +1045,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (rowsToRemove.Count > 0)
             {
-                OnPropertyChanged(nameof(OverlayLootRows));
+                NotifyLootOrderingChanged();
                 RefreshMetrics();
                 AutoSaveCurrentSession();
             }
@@ -964,7 +1290,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         CloseOverlayWindow();
 
         var previewSettings = settingsWindow.GetOverlayPreviewSettings();
-        OnPropertyChanged(nameof(OverlayLootRows));
+        NotifyLootOrderingChanged();
 
         var editor = new OverlayWindow(this, _settingsService, previewSettings, editMode: true);
         _overlayWindow = editor;
@@ -1239,8 +1565,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string currentVersion = VersionText.TrimStart('v', 'V');
             _settings = _settingsService.Load();
 
-            if (string.Equals(_settings.LastSeenChangelogVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
+            bool forcedByUpdater = string.Equals(
+                _settings.PendingChangelogVersion,
+                currentVersion,
+                StringComparison.OrdinalIgnoreCase);
+
+            if (!forcedByUpdater &&
+                string.Equals(_settings.LastSeenChangelogVersion, currentVersion, StringComparison.OrdinalIgnoreCase))
+            {
                 return;
+            }
 
             var entry = new ChangelogService().GetForVersion(currentVersion);
             if (entry == null)
@@ -1256,6 +1590,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             // so it does not annoy the user on every application start.
             var latest = _settingsService.Load();
             latest.LastSeenChangelogVersion = currentVersion;
+            latest.PendingChangelogVersion = string.Empty;
             _settingsService.Save(latest);
             _settings = latest;
         }

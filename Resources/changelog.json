@@ -3,6 +3,10 @@
     "title": "What's New",
     "changes": [
       {
+        "title": "Tabbed settings",
+        "description": "Settings now uses dedicated tabs for Network, Database & Loot, Character, Garmoth, Overlay, Keybinds, and Ignore List. The active tab is underlined, and Save Changes stays visible at the bottom."
+      },
+      {
         "title": "Storage filtering",
         "description": "Storage and Transaction Maid withdrawals detected by the tested transfer packet are no longer counted as loot."
       },
@@ -17,6 +21,35 @@
       {
         "title": "Global keybinds",
         "description": "Optional global shortcuts can toggle Start / Stop Tracking and Overlay ON / OFF, even while BDO is focused or the tracker is in the tray."
+      }
+    ]
+  },
+  "0.13.0": {
+    "title": "What's New",
+    "changes": [
+      {
+        "title": "Garmoth quick upload",
+        "description": "A Garmoth upload panel is back under STOP on the main screen. It uploads the most recent completed session without opening Session History."
+      },
+      {
+        "title": "Live update notification",
+        "description": "The tracker now checks for updates while it is running and shows a small update button in the bottom status bar. Clicking it downloads, installs, and restarts the app."
+      },
+      {
+        "title": "Reliable What's New",
+        "description": "The updater now records the pending target version before restart, so the changelog is shown reliably once after an update finishes."
+      },
+      {
+        "title": "Optional Garmoth loot filter",
+        "description": "Settings → Garmoth now includes a checkbox to track only item IDs found in the cached Garmoth grind-drop list. Turn it off to track every detected loot item."
+      },
+      {
+        "title": "Shared loot sorting",
+        "description": "The Overlay loot sort setting now controls both the main-screen Loot List and the in-game overlay."
+      },
+      {
+        "title": "Npcap diagnostics",
+        "description": "Settings → Network now shows whether Npcap is installed and whether capture adapters are visible, with a Recheck button."
       }
     ]
   }

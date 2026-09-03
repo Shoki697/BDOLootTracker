@@ -1,6 +1,6 @@
+using System.IO;
 using System.Reflection;
 using System.Text.Json;
-using System.IO;
 using BDOLootTracker.Models;
 
 namespace BDOLootTracker.Services;
@@ -23,7 +23,7 @@ public sealed class ChangelogService
                 return null;
 
             using var stream = assembly.GetManifestResourceStream(resourceName);
-            if (stream == null)
+            if (stream is null)
                 return null;
 
             var entries = JsonSerializer.Deserialize<Dictionary<string, ChangelogEntry>>(

@@ -807,6 +807,27 @@ public sealed class DatabaseService
         return result;
     }
 
+    public HashSet<uint> GetGarmothKnownLootItemIds()
+    {
+        var result = new HashSet<uint>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT ItemId FROM GrindSpotDrops WHERE ItemId > 0;";
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long raw = reader.GetInt64(0);
+            if (raw > 0 && raw <= uint.MaxValue)
+                result.Add((uint)raw);
+        }
+
+        return result;
+    }
+
     public void UpdateSessionSpot(long sessionId, string spotKey, string spotName)
     {
         if (sessionId <= 0)

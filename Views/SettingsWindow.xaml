@@ -11,33 +11,41 @@
         Foreground="{StaticResource Text}"
         WindowStartupLocation="CenterOwner">
     <Window.Resources>
-        <Style x:Key="SettingsNavButtonStyle" TargetType="Button">
-            <Setter Property="Foreground" Value="{StaticResource Text}" />
+        <Style x:Key="SettingsTabButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource Muted}" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="11,9" />
+            <Setter Property="BorderThickness" Value="0,0,0,2" />
+            <Setter Property="Padding" Value="11,10,11,9" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="NavBorder"
+                        <Border x:Name="TabBorder"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
                                 Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Left"
+                            <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="NavBorder" Property="Opacity" Value="0.88" />
+                                <Setter Property="Foreground" Value="{StaticResource Text}" />
+                                <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource PanelHover}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="NavBorder" Property="Opacity" Value="0.72" />
+                                <Setter TargetName="TabBorder" Property="Opacity" Value="0.72" />
+                            </Trigger>
+                            <Trigger Property="Tag" Value="Active">
+                                <Setter Property="Foreground" Value="{StaticResource Text}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource Accent}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="TabBorder" Property="Opacity" Value="0.45" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -49,7 +57,9 @@
     <Grid Background="{StaticResource Bg}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0"
@@ -58,85 +68,59 @@
                    FontWeight="SemiBold"
                    Margin="20,20,20,14" />
 
-        <Grid Grid.Row="1" Margin="20,0,20,20">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="170" />
-                <ColumnDefinition Width="14" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+        <!-- TABS -->
+        <Border Grid.Row="1"
+                Margin="20,0,20,0"
+                BorderBrush="{StaticResource Border}"
+                BorderThickness="0,0,0,1">
+            <WrapPanel x:Name="SettingsTabPanel">
+                <Button x:Name="NetworkTabButton"
+                        Style="{StaticResource SettingsTabButtonStyle}"
+                        Tag="Active"
+                        CommandParameter="NetworkSection"
+                        Content="Network"
+                        Click="SettingsTab_Click" />
+                <Button x:Name="DatabaseTabButton"
+                        Style="{StaticResource SettingsTabButtonStyle}"
+                        CommandParameter="DatabaseSection"
+                        Content="Database &amp; Loot"
+                        Click="SettingsTab_Click" />
+                <Button x:Name="CharacterTabButton"
+                        Style="{StaticResource SettingsTabButtonStyle}"
+                        CommandParameter="CharacterSection"
+                        Content="Character"
+                        Click="SettingsTab_Click" />
+                <Button x:Name="GarmothTabButton"
+                        Style="{StaticResource SettingsTabButtonStyle}"
+                        CommandParameter="GarmothSection"
+                        Content="Garmoth"
+                        Click="SettingsTab_Click" />
+                <Button x:Name="OverlayTabButton"
+                        Style="{StaticResource SettingsTabButtonStyle}"
+                        CommandParameter="OverlaySection"
+                        Content="Overlay"
+                        Click="SettingsTab_Click" />
+                <Button x:Name="KeybindsTabButton"
+                        Style="{StaticResource SettingsTabButtonStyle}"
+                        CommandParameter="KeybindsSection"
+                        Content="Keybinds"
+                        Click="SettingsTab_Click" />
+                <Button x:Name="IgnoreTabButton"
+                        Style="{StaticResource SettingsTabButtonStyle}"
+                        CommandParameter="IgnoreSection"
+                        Content="Ignore List"
+                        Click="SettingsTab_Click" />
+            </WrapPanel>
+        </Border>
 
-            <Border Grid.Column="0"
-                    Background="{StaticResource Panel}"
-                    BorderBrush="{StaticResource Border}"
-                    BorderThickness="1"
-                    CornerRadius="10"
-                    Padding="10"
-                    VerticalAlignment="Top">
-                <StackPanel>
-                    <TextBlock Text="QUICK NAVIGATION"
-                               Foreground="{StaticResource Muted}"
-                               FontSize="10"
-                               FontWeight="SemiBold"
-                               Margin="8,4,8,8" />
-
-                    <Button x:Name="NetworkNavButton"
-                            Style="{StaticResource SettingsNavButtonStyle}"
-                            Tag="NetworkSection"
-                            Content="Network"
-                            HorizontalContentAlignment="Left"
-                            Margin="0,0,0,4"
-                            Click="NavigateSection_Click" />
-                    <Button x:Name="DatabaseNavButton"
-                            Style="{StaticResource SettingsNavButtonStyle}"
-                            Tag="DatabaseSection"
-                            Content="Database &amp; Loot"
-                            HorizontalContentAlignment="Left"
-                            Margin="0,0,0,4"
-                            Click="NavigateSection_Click" />
-                    <Button x:Name="CharacterNavButton"
-                            Style="{StaticResource SettingsNavButtonStyle}"
-                            Tag="CharacterSection"
-                            Content="Character"
-                            HorizontalContentAlignment="Left"
-                            Margin="0,0,0,4"
-                            Click="NavigateSection_Click" />
-                    <Button x:Name="GarmothNavButton"
-                            Style="{StaticResource SettingsNavButtonStyle}"
-                            Tag="GarmothSection"
-                            Content="Garmoth"
-                            HorizontalContentAlignment="Left"
-                            Margin="0,0,0,4"
-                            Click="NavigateSection_Click" />
-                    <Button x:Name="OverlayNavButton"
-                            Style="{StaticResource SettingsNavButtonStyle}"
-                            Tag="OverlaySection"
-                            Content="Overlay"
-                            HorizontalContentAlignment="Left"
-                            Margin="0,0,0,4"
-                            Click="NavigateSection_Click" />
-                    <Button x:Name="KeybindsNavButton"
-                            Style="{StaticResource SettingsNavButtonStyle}"
-                            Tag="KeybindsSection"
-                            Content="Keybinds"
-                            HorizontalContentAlignment="Left"
-                            Margin="0,0,0,4"
-                            Click="NavigateSection_Click" />
-                    <Button x:Name="IgnoreNavButton"
-                            Style="{StaticResource SettingsNavButtonStyle}"
-                            Tag="IgnoreSection"
-                            Content="Ignore List"
-                            HorizontalContentAlignment="Left"
-                            Click="NavigateSection_Click" />
-                </StackPanel>
-            </Border>
-
-            <ScrollViewer x:Name="SettingsScrollViewer"
-                          Grid.Column="2"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          Background="{StaticResource Bg}">
-                <StackPanel x:Name="SettingsContentPanel">
-
+        <!-- Only the active tab is visible; controls remain alive so unsaved edits survive tab changes. -->
+        <ScrollViewer x:Name="SettingsScrollViewer"
+                      Grid.Row="2"
+                      Margin="20,16,20,0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Background="{StaticResource Bg}">
+            <StackPanel x:Name="SettingsContentPanel">
                     <!-- NETWORK -->
                     <Border x:Name="NetworkSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
                 <StackPanel>
@@ -149,11 +133,64 @@
                             Click="RefreshAdapters_Click"
                             Margin="0,10,0,0"
                             HorizontalAlignment="Left" />
+
+                    <Border Margin="0,18,0,0"
+                            Padding="14"
+                            Background="#0D151D"
+                            BorderBrush="{StaticResource Border}"
+                            BorderThickness="1"
+                            CornerRadius="7">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Row="0" Grid.Column="0">
+                                <TextBlock Text="NPCAP"
+                                           Foreground="{StaticResource Muted}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold" />
+                                <TextBlock x:Name="NpcapStatusText"
+                                           Text="Checking..."
+                                           FontWeight="SemiBold"
+                                           Margin="0,5,0,0" />
+                            </StackPanel>
+
+                            <Button x:Name="RecheckNpcapButton"
+                                    Grid.Row="0"
+                                    Grid.Column="1"
+                                    Content="Recheck"
+                                    VerticalAlignment="Center"
+                                    Click="RecheckNpcap_Click" />
+
+                            <TextBlock x:Name="NpcapDetailsText"
+                                       Grid.Row="1"
+                                       Grid.ColumnSpan="2"
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0" />
+
+                            <TextBlock Grid.Row="2"
+                                       Grid.ColumnSpan="2"
+                                       Text="Npcap is required for packet capture. The status above also verifies that SharpPcap can see capture adapters."
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0" />
+                        </Grid>
+                    </Border>
                 </StackPanel>
             </Border>
 
                     <!-- DATABASE + MARKET -->
-                    <Border x:Name="DatabaseSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
+                    <Border x:Name="DatabaseSection" Visibility="Collapsed" Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
                 <StackPanel>
                     <TextBlock Text="DATABASE &amp; LOOT DATA"
                                Foreground="{StaticResource Accent}"
@@ -243,7 +280,7 @@
             </Border>
 
                     <!-- CHARACTER -->
-                    <Border x:Name="CharacterSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                    <Border x:Name="CharacterSection" Visibility="Collapsed" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="CHARACTER (OPTIONAL)"
                                Foreground="{StaticResource Accent}"
@@ -325,7 +362,7 @@
             </Border>
 
                     <!-- GARMOTH -->
-                    <Border x:Name="GarmothSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                    <Border x:Name="GarmothSection" Visibility="Collapsed" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="GARMOTH"
                                Foreground="{StaticResource Accent}"
@@ -337,17 +374,27 @@
 
                     <PasswordBox x:Name="GarmothApiKeyBox" />
 
-                    <TextBlock Text="Used only when you explicitly upload a completed session from Session History. The token is stored locally in this app's settings file."
+                    <TextBlock Text="Used only when you explicitly upload a completed session from the main window or Session History. The token is stored locally in this app's settings file."
                                Foreground="{StaticResource Muted}"
                                FontSize="12"
                                TextWrapping="Wrap"
                                Margin="0,8,0,0" />
+
+                    <Border Height="1" Background="{StaticResource Border}" Margin="0,16,0,14" />
+
+                    <CheckBox x:Name="GarmothOnlyLootCheckBox"
+                              Content="Show and track only loot items known by Garmoth" />
+                    <TextBlock Text="When enabled, packet items that are not present in the locally cached Garmoth grind-spot drop list are ignored. Disable it to track every detected loot item."
+                               Foreground="{StaticResource Muted}"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="24,6,0,0" />
                 </StackPanel>
             </Border>
 
 
                     <!-- OVERLAY -->
-                    <Border x:Name="OverlaySection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                    <Border x:Name="OverlaySection" Visibility="Collapsed" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="OVERLAY"
                                Foreground="{StaticResource Accent}"
@@ -425,6 +472,12 @@
                         </StackPanel>
                     </Grid>
 
+                    <TextBlock Text="Sorting applies to both the main-screen Loot List and the in-game overlay."
+                               Foreground="{StaticResource Muted}"
+                               FontSize="10"
+                               TextWrapping="Wrap"
+                               Margin="0,6,0,0" />
+
                     <Grid Margin="0,14,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -478,7 +531,7 @@
             </Border>
 
                     <!-- KEYBINDS -->
-                    <Border x:Name="KeybindsSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                    <Border x:Name="KeybindsSection" Visibility="Collapsed" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
                         <StackPanel>
                             <TextBlock Text="KEYBINDS"
                                        Foreground="{StaticResource Accent}"
@@ -541,7 +594,7 @@
                     </Border>
 
                     <!-- IGNORE LIST -->
-                    <Border x:Name="IgnoreSection" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
+                    <Border x:Name="IgnoreSection" Visibility="Collapsed" Style="{StaticResource PanelBorder}" Margin="0,0,0,16">
                 <StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -573,26 +626,44 @@
                             Click="RemoveSelectedIgnore_Click" />
                 </StackPanel>
             </Border>
+            </StackPanel>
+        </ScrollViewer>
 
+        <!-- Fixed action bar: always visible, independent of tab content/scroll position. -->
+        <Border Grid.Row="3"
+                Background="{StaticResource Panel}"
+                BorderBrush="{StaticResource Border}"
+                BorderThickness="0,1,0,0"
+                Padding="20,13,20,17"
+                Margin="0,14,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="10" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Button x:Name="SaveButton"
-                        Grid.Column="0"
-                        Content="Save"
-                        Background="#1266A8"
-                        Click="Save_Click" />
+                <TextBlock x:Name="UnsavedChangesText"
+                           Grid.Column="0"
+                           Text="Unsaved changes"
+                           Foreground="{StaticResource Muted}"
+                           VerticalAlignment="Center"
+                           Visibility="Collapsed" />
+
                 <Button x:Name="CancelButton"
-                        Grid.Column="2"
+                        Grid.Column="1"
                         Content="Cancel"
+                        MinWidth="96"
                         Click="Cancel_Click" />
+                <Button x:Name="SaveButton"
+                        Grid.Column="3"
+                        Content="Save Changes"
+                        MinWidth="128"
+                        Background="#1266A8"
+                        IsEnabled="False"
+                        Click="Save_Click" />
             </Grid>
-                </StackPanel>
-            </ScrollViewer>
-        </Grid>
+        </Border>
     </Grid>
 </Window>

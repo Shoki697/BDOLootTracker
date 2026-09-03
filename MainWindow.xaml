@@ -8,7 +8,7 @@
         MinHeight="650"
         Background="{StaticResource Bg}"
         Foreground="{StaticResource Text}"
-        WindowStartupLocation="CenterScreen" Icon="/Resources/AppIcon.png">
+        WindowStartupLocation="CenterScreen">
     <Grid Margin="18" Background="{StaticResource Bg}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -327,6 +327,32 @@
                             FontWeight="SemiBold"
                             IsEnabled="False"
                             Click="Stop_Click" />
+
+                    <Border Margin="0,12,0,0"
+                            Padding="12"
+                            Background="#0D151D"
+                            BorderBrush="{StaticResource Border}"
+                            BorderThickness="1"
+                            CornerRadius="7">
+                        <StackPanel>
+                            <TextBlock Text="GARMOTH"
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold" />
+                            <Button x:Name="MainGarmothUploadButton"
+                                    Content="☁  UPLOAD LAST SESSION"
+                                    Height="38"
+                                    Margin="0,8,0,0"
+                                    Background="#1266A8"
+                                    FontWeight="SemiBold"
+                                    Click="UploadLastSessionToGarmoth_Click" />
+                            <TextBlock Text="Uploads the most recently completed session."
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap"
+                                       Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <!-- Reserved space for future live-session info -->
@@ -380,12 +406,13 @@
                     </Grid>
 
                     <DataGrid Grid.Row="1"
-                              ItemsSource="{Binding LootRows}"
+                              ItemsSource="{Binding MainLootRows}"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
                               CanUserAddRows="False"
                               CanUserDeleteRows="False"
                               CanUserResizeRows="False"
+                              CanUserSortColumns="False"
                               HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal"
                               RowHeaderWidth="0"
@@ -472,6 +499,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <TextBlock Text="{Binding StatusText}"
@@ -480,7 +508,18 @@
                        VerticalAlignment="Center"
                        Margin="0,0,10,0" />
 
-            <StackPanel Grid.Column="1"
+            <Button x:Name="UpdateNowButton"
+                    Grid.Column="1"
+                    Content="{Binding UpdateBannerText}"
+                    Visibility="{Binding UpdateBannerVisibility}"
+                    Padding="10,5"
+                    Margin="0,0,14,0"
+                    Background="#1266A8"
+                    FontSize="11"
+                    FontWeight="SemiBold"
+                    Click="UpdateNow_Click" />
+
+            <StackPanel Grid.Column="2"
                         Orientation="Horizontal">
                 <Ellipse Width="9"
                          Height="9"

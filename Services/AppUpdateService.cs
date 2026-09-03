@@ -1,6 +1,5 @@
 using System.IO;
 using System.Text.Json;
-using System.Windows;
 using Velopack;
 using Velopack.Sources;
 
@@ -10,80 +9,80 @@ public sealed class AppUpdateService
 {
     private const string ConfigFileName = "update-source.json";
 
-    public async Task CheckForUpdatesAsync(Window owner, bool showNoUpdateMessage = false)
+    public sealed record AvailableUpdateInfo(
+        string CurrentVersion,
+        string NewVersion,
+        string ReleaseNotes);
+
+    /// <summary>
+    /// Performs a silent update check. It never shows UI and returns null when
+    /// updates are unavailable, the app is not a Velopack install, or the check
+    /// cannot be completed.
+    /// </summary>
+    public async Task<AvailableUpdateInfo?> CheckForAvailableUpdateAsync()
     {
         UpdateSourceConfig? config = LoadConfig();
         if (config == null || string.IsNullOrWhiteSpace(config.RepositoryUrl))
-            return;
+            return null;
 
         try
         {
-            var source = new GithubSource(
-                config.RepositoryUrl.TrimEnd('/'),
-                accessToken: null,
-                prerelease: config.IncludePrereleases);
+            var manager = CreateManager(config);
 
-            var manager = new UpdateManager(source);
-
-            // Updates only work for a real Velopack install. Running directly
-            // from Visual Studio/bin/publish is intentionally ignored.
+            // Running directly from Visual Studio/bin/publish is intentionally
+            // ignored. Update UI is only meaningful for a real Velopack install.
             if (!manager.IsInstalled)
-                return;
+                return null;
 
             UpdateInfo? update = await manager.CheckForUpdatesAsync();
             if (update == null)
-            {
-                if (showNoUpdateMessage)
-                {
-                    MessageBox.Show(
-                        owner,
-                        "You already have the latest version.",
-                        "BDO Loot Tracker Update",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
-                }
+                return null;
 
-                return;
-            }
-
-            string newVersion = update.TargetFullRelease.Version.ToString();
-            string currentVersion = manager.CurrentVersion?.ToString() ?? "current";
-
+            string newVersion = NormalizeVersion(update.TargetFullRelease.Version.ToString());
+            string currentVersion = NormalizeVersion(manager.CurrentVersion?.ToString() ?? string.Empty);
             string notes = string.IsNullOrWhiteSpace(update.TargetFullRelease.NotesMarkdown)
                 ? string.Empty
-                : $"\n\nRelease notes:\n{TrimReleaseNotes(update.TargetFullRelease.NotesMarkdown, 900)}";
+                : TrimReleaseNotes(update.TargetFullRelease.NotesMarkdown, 900);
 
-            MessageBoxResult result = MessageBox.Show(
-                owner,
-                $"A new BDO Loot Tracker version is available.\n\n" +
-                $"Installed: {currentVersion}\n" +
-                $"Available: {newVersion}" +
-                notes +
-                "\n\nDownload and install it now? The tracker will restart automatically.",
-                "Update Available",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Information);
-
-            if (result != MessageBoxResult.Yes)
-                return;
-
-            await manager.DownloadUpdatesAsync(update);
-            manager.ApplyUpdatesAndRestart(update);
+            return new AvailableUpdateInfo(currentVersion, newVersion, notes);
         }
-        catch (Exception ex)
+        catch
         {
-            // Startup update checks must never prevent the tracker from opening.
-            // Only manual checks should bother the user with network/update errors.
-            if (showNoUpdateMessage)
-            {
-                MessageBox.Show(
-                    owner,
-                    $"Could not check for updates.\n\n{ex.Message}",
-                    "Update Check Failed",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-            }
+            // Periodic checks must never interrupt loot tracking.
+            return null;
         }
+    }
+
+    /// <summary>
+    /// Re-checks GitHub, downloads the latest Velopack package and restarts the
+    /// application. UI confirmation is intentionally handled by MainWindow.
+    /// </summary>
+    public async Task InstallLatestUpdateAsync()
+    {
+        UpdateSourceConfig? config = LoadConfig();
+        if (config == null || string.IsNullOrWhiteSpace(config.RepositoryUrl))
+            throw new InvalidOperationException("The update source is not configured for this installation.");
+
+        var manager = CreateManager(config);
+        if (!manager.IsInstalled)
+            throw new InvalidOperationException("Automatic updates are only available in the installed version of BDO Loot Tracker.");
+
+        UpdateInfo? update = await manager.CheckForUpdatesAsync();
+        if (update == null)
+            throw new InvalidOperationException("No newer version is currently available.");
+
+        await manager.DownloadUpdatesAsync(update);
+        manager.ApplyUpdatesAndRestart(update);
+    }
+
+    private static UpdateManager CreateManager(UpdateSourceConfig config)
+    {
+        var source = new GithubSource(
+            config.RepositoryUrl.TrimEnd('/'),
+            accessToken: null,
+            prerelease: config.IncludePrereleases);
+
+        return new UpdateManager(source);
     }
 
     private static UpdateSourceConfig? LoadConfig()
@@ -105,6 +104,9 @@ public sealed class AppUpdateService
             return null;
         }
     }
+
+    private static string NormalizeVersion(string value)
+        => (value ?? string.Empty).Trim().TrimStart('v', 'V');
 
     private static string TrimReleaseNotes(string notes, int maxLength)
     {

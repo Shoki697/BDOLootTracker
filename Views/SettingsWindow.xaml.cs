@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using BDOLootTracker.Models;
 using BDOLootTracker.Services;
 using Microsoft.Win32;
@@ -33,9 +34,12 @@ public partial class SettingsWindow : Window
         LoadValues();
 
         _isLoading = false;
+        HookChangeTracking();
         RefreshDatabaseStatus();
         RefreshIgnoreList();
-        SetActiveNavButton(NetworkNavButton);
+        RefreshNpcapStatus();
+        ShowTab(NetworkTabButton, NetworkSection);
+        UpdateSaveButtonState();
 
         Closing += SettingsWindow_Closing;
         Closed += (_, _) =>
@@ -46,9 +50,9 @@ public partial class SettingsWindow : Window
     }
 
 
-    private void NavigateSection_Click(object sender, RoutedEventArgs e)
+    private void SettingsTab_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not string sectionName)
+        if (sender is not Button button || button.CommandParameter is not string sectionName)
             return;
 
         FrameworkElement? section = sectionName switch
@@ -63,40 +67,145 @@ public partial class SettingsWindow : Window
             _ => null
         };
 
-        if (section == null)
-            return;
-
-        // Translate the section into the scrolling content's coordinate system.
-        // This gives deterministic jumps even when panel heights change after a
-        // database refresh or when the window is resized.
-        Point point = section.TranslatePoint(new Point(0, 0), SettingsContentPanel);
-        SettingsScrollViewer.ScrollToVerticalOffset(Math.Max(0, point.Y));
-        SetActiveNavButton(button);
+        if (section != null)
+            ShowTab(button, section);
     }
 
-    private void SetActiveNavButton(Button activeButton)
+    private void ShowTab(Button activeButton, FrameworkElement activeSection)
     {
+        FrameworkElement[] sections =
+        {
+            NetworkSection,
+            DatabaseSection,
+            CharacterSection,
+            GarmothSection,
+            OverlaySection,
+            KeybindsSection,
+            IgnoreSection
+        };
+
+        foreach (FrameworkElement section in sections)
+            section.Visibility = ReferenceEquals(section, activeSection) ? Visibility.Visible : Visibility.Collapsed;
+
         Button[] buttons =
         {
-            NetworkNavButton,
-            DatabaseNavButton,
-            CharacterNavButton,
-            GarmothNavButton,
-            OverlayNavButton,
-            KeybindsNavButton,
-            IgnoreNavButton
+            NetworkTabButton,
+            DatabaseTabButton,
+            CharacterTabButton,
+            GarmothTabButton,
+            OverlayTabButton,
+            KeybindsTabButton,
+            IgnoreTabButton
         };
 
         foreach (Button button in buttons)
-        {
-            button.Background = ReferenceEquals(button, activeButton)
-                ? (System.Windows.Media.Brush)FindResource("PanelHover")
-                : System.Windows.Media.Brushes.Transparent;
+            button.Tag = ReferenceEquals(button, activeButton) ? "Active" : null;
 
-            button.BorderBrush = ReferenceEquals(button, activeButton)
-                ? (System.Windows.Media.Brush)FindResource("Accent")
-                : System.Windows.Media.Brushes.Transparent;
+        SettingsScrollViewer.ScrollToTop();
+    }
+
+    private void HookChangeTracking()
+    {
+        AdapterCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        RegionCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        LanguageCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        DatabasePathBox.TextChanged += (_, _) => UpdateSaveButtonState();
+        ClassCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        SpecCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        CharacterBox.TextChanged += (_, _) => UpdateSaveButtonState();
+        GarmothApiKeyBox.PasswordChanged += (_, _) => UpdateSaveButtonState();
+        GarmothOnlyLootCheckBox.Checked += (_, _) => UpdateSaveButtonState();
+        GarmothOnlyLootCheckBox.Unchecked += (_, _) => UpdateSaveButtonState();
+        OverlayModeCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        OverlayOpacitySlider.ValueChanged += (_, _) => UpdateSaveButtonState();
+        OverlayMaxItemsBox.TextChanged += (_, _) => UpdateSaveButtonState();
+        OverlaySortByCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        OverlaySortOrderCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        StartStopHotkeyBox.TextChanged += (_, _) => UpdateSaveButtonState();
+        OverlayHotkeyBox.TextChanged += (_, _) => UpdateSaveButtonState();
+    }
+
+    private void UpdateSaveButtonState()
+    {
+        if (_isLoading || _isFetching)
+        {
+            SaveButton.IsEnabled = false;
+            return;
         }
+
+        bool hasChanges = HasSettingsChanges();
+        SaveButton.IsEnabled = hasChanges;
+        UnsavedChangesText.Visibility = hasChanges ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private bool HasSettingsChanges()
+    {
+        string selectedAdapter = (AdapterCombo.SelectedItem as NetworkAdapterOption)?.Name ?? string.Empty;
+        if (!string.Equals(selectedAdapter, _settings.AdapterName ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(GetSelectedRegion(), DatabaseService.NormalizeRegion(_settings.Region), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(GetSelectedLanguage(), DatabaseService.NormalizeLanguage(_settings.ItemLanguage), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(DatabasePathBox.Text.Trim(), _settings.DatabasePath ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        CharacterClassOption? selectedClass = ClassCombo.SelectedItem as CharacterClassOption;
+        int? selectedClassType = selectedClass != null && selectedClass.ClassType >= 0 ? selectedClass.ClassType : null;
+        string selectedSpec = selectedClassType != null ? (SpecCombo.SelectedItem?.ToString() ?? string.Empty) : string.Empty;
+
+        if (selectedClassType != _settings.CharacterClassType)
+            return true;
+
+        if (!string.Equals(selectedSpec, _settings.CharacterSpec ?? string.Empty, StringComparison.Ordinal))
+            return true;
+
+        if (!string.Equals(CharacterBox.Text.Trim(), _settings.CharacterName ?? string.Empty, StringComparison.Ordinal))
+            return true;
+
+        if (!string.Equals(GarmothApiKeyBox.Password.Trim(), _settings.GarmothApiKey ?? string.Empty, StringComparison.Ordinal))
+            return true;
+
+        if ((GarmothOnlyLootCheckBox.IsChecked == true) != _settings.OnlyTrackGarmothItems)
+            return true;
+
+        string overlayMode = OverlayModeCombo.SelectedItem?.ToString() == "Compact" ? "Compact" : "Detailed";
+        if (!string.Equals(overlayMode, _settings.OverlayMode, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        double opacity = Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.10, 1.0);
+        if (Math.Abs(opacity - Math.Clamp(_settings.OverlayBackgroundOpacity, 0.10, 1.0)) > 0.0001)
+            return true;
+
+        if (GetOverlayMaxItems() != Math.Clamp(_settings.OverlayMaxDisplayedItems, 1, 20))
+            return true;
+
+        if (!string.Equals(
+                NormalizeOverlaySortBy(OverlaySortByCombo.SelectedItem?.ToString()),
+                NormalizeOverlaySortBy(_settings.OverlaySortBy),
+                StringComparison.Ordinal))
+            return true;
+
+        bool sortDescending = OverlaySortOrderCombo.SelectedItem?.ToString() != "Ascending";
+        if (sortDescending != _settings.OverlaySortDescending)
+            return true;
+
+        if (!string.Equals(
+                NormalizeHotkeyText(StartStopHotkeyBox.Text),
+                NormalizeHotkeyText(_settings.StartStopHotkey),
+                StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(
+                NormalizeHotkeyText(OverlayHotkeyBox.Text),
+                NormalizeHotkeyText(_settings.OverlayHotkey),
+                StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
     }
 
     private void SettingsWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -145,6 +254,7 @@ public partial class SettingsWindow : Window
         DatabasePathBox.Text = _settings.DatabasePath;
         CharacterBox.Text = _settings.CharacterName;
         GarmothApiKeyBox.Password = _settings.GarmothApiKey ?? string.Empty;
+        GarmothOnlyLootCheckBox.IsChecked = _settings.OnlyTrackGarmothItems;
 
         OverlayModeCombo.ItemsSource = new[] { "Detailed", "Compact" };
         OverlayModeCombo.SelectedItem = string.Equals(_settings.OverlayMode, "Compact", StringComparison.OrdinalIgnoreCase)
@@ -215,6 +325,8 @@ public partial class SettingsWindow : Window
         finally
         {
             _isLoading = previousLoading;
+            if (!_isLoading)
+                UpdateSaveButtonState();
         }
     }
 
@@ -274,7 +386,60 @@ public partial class SettingsWindow : Window
     }
 
     private void RefreshAdapters_Click(object sender, RoutedEventArgs e)
-        => LoadAdapters();
+    {
+        LoadAdapters();
+        RefreshNpcapStatus();
+    }
+
+    private void RecheckNpcap_Click(object sender, RoutedEventArgs e)
+        => RefreshNpcapStatus();
+
+    private void RefreshNpcapStatus()
+    {
+        try
+        {
+            bool installed = NpcapPrerequisiteService.IsInstalled();
+            int adapterCount = 0;
+
+            try
+            {
+                adapterCount = CaptureDeviceList.Instance.Count;
+            }
+            catch
+            {
+                adapterCount = 0;
+            }
+
+            if (!installed)
+            {
+                NpcapStatusText.Text = "Not installed";
+                NpcapStatusText.Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+                NpcapDetailsText.Text = "Npcap was not detected. Loot tracking cannot start until Npcap is installed.";
+                return;
+            }
+
+            string? version = NpcapPrerequisiteService.GetInstalledVersion();
+            string versionText = string.IsNullOrWhiteSpace(version) ? string.Empty : $" • v{version}";
+
+            if (adapterCount <= 0)
+            {
+                NpcapStatusText.Text = $"Installed{versionText} • Problem detected";
+                NpcapStatusText.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+                NpcapDetailsText.Text = "Npcap is present, but no capture adapters are visible. Try Recheck or reinstall Npcap if packet capture cannot start.";
+                return;
+            }
+
+            NpcapStatusText.Text = $"Installed{versionText} • Ready";
+            NpcapStatusText.Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94));
+            NpcapDetailsText.Text = $"Packet capture looks ready • {adapterCount:N0} capture adapter(s) detected.";
+        }
+        catch (Exception ex)
+        {
+            NpcapStatusText.Text = "Status check failed";
+            NpcapStatusText.Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+            NpcapDetailsText.Text = ex.Message;
+        }
+    }
 
     private void DatabaseOption_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -503,6 +668,7 @@ public partial class SettingsWindow : Window
         settingsToSave.CharacterName = CharacterBox.Text.Trim();
         settingsToSave.DatabasePath = databasePath;
         settingsToSave.GarmothApiKey = GarmothApiKeyBox.Password.Trim();
+        settingsToSave.OnlyTrackGarmothItems = GarmothOnlyLootCheckBox.IsChecked == true;
         settingsToSave.OverlayMode = OverlayModeCombo.SelectedItem?.ToString() == "Compact" ? "Compact" : "Detailed";
         settingsToSave.OverlayBackgroundOpacity = Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.10, 1.0);
         settingsToSave.OverlayMaxDisplayedItems = GetOverlayMaxItems();
@@ -579,6 +745,7 @@ public partial class SettingsWindow : Window
     {
         AdapterCombo.IsEnabled = enabled;
         RefreshAdaptersButton.IsEnabled = enabled;
+        RecheckNpcapButton.IsEnabled = enabled;
         RegionCombo.IsEnabled = enabled;
         LanguageCombo.IsEnabled = enabled;
         DatabasePathBox.IsEnabled = enabled;
@@ -586,6 +753,7 @@ public partial class SettingsWindow : Window
         ClassCombo.IsEnabled = enabled;
         CharacterBox.IsEnabled = enabled;
         GarmothApiKeyBox.IsEnabled = enabled;
+        GarmothOnlyLootCheckBox.IsEnabled = enabled;
         OverlayModeCombo.IsEnabled = enabled;
         OverlayOpacitySlider.IsEnabled = enabled;
         OverlayMaxItemsBox.IsEnabled = enabled;
@@ -604,8 +772,12 @@ public partial class SettingsWindow : Window
         IgnoreListBox.IsEnabled = enabled;
         RemoveIgnoreButton.IsEnabled = enabled;
         FetchButton.IsEnabled = enabled;
-        SaveButton.IsEnabled = enabled;
         CancelButton.IsEnabled = enabled;
+
+        if (enabled)
+            UpdateSaveButtonState();
+        else
+            SaveButton.IsEnabled = false;
     }
 
     private void OverlayOpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -675,6 +847,7 @@ public partial class SettingsWindow : Window
         latest.OverlayCompactHeight = 165;
         _settingsService.Save(latest);
         _settings = latest;
+        UpdateSaveButtonState();
 
         OverlayResetRequested?.Invoke(this, EventArgs.Empty);
     }

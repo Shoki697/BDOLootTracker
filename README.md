@@ -1,14 +1,16 @@
-# BDO Loot Tracker - WIP
+# BDO Loot Tracker
 
 A Windows desktop loot tracker for Black Desert Online.
 
-BDO Loot Tracker uses **Npcap** to passively capture Black Desert Online network traffic and process the relevant incoming game data in real time. 
+BDO Loot Tracker uses **Npcap** to passively capture Black Desert Online network traffic and process the relevant incoming game data in real time.
 
 ![Release](https://img.shields.io/github/v/release/Shoki697/BDOLootTracker)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
 
 [Download the latest release](https://github.com/Shoki697/BDOLootTracker/releases)
+
+![BDO Loot Tracker](images/main-window.png)
 
 ---
 
@@ -17,7 +19,7 @@ BDO Loot Tracker uses **Npcap** to passively capture Black Desert Online network
 - Windows 10/11 x64
 - Npcap installed on the PC
 
-Npcap is required for packet capture.
+Npcap is required for packet capture.  
 [Download Npcap](https://npcap.com/)
 
 ### Installation
@@ -28,7 +30,7 @@ Npcap is required for packet capture.
 
 ### First Run
 
-Open **Settings**, select your network adapter, market region and item language, then run **Fetch / Update Database**.
+Open **Settings**, select your network adapter, market region and item language, then run **Fetch / Update Database**.  
 After that, press **Start** to begin tracking.
 
 ---
@@ -48,8 +50,6 @@ After that, press **Start** to begin tracking.
 ---
 
 ## Main Window
-
-![Main Window](images/main-window.png)
 
 Track your current grinding session with live loot, silver and trash statistics.  
 The current class and detected grind spot are shown at the top.
@@ -92,7 +92,12 @@ Items added to the Ignore List are excluded from future live tracking and calcul
 
 ## Garmoth Integration
 
-Add your Garmoth API token under **Settings → Garmoth**.
+Add your Garmoth API token under **Settings → Garmoth**.  
 Completed sessions can then be uploaded from the **Sessions** window.
 
 ---
+
+## Disclaimer
+
+BDO Loot Tracker is an unofficial community project and is not affiliated with or endorsed by Pearl Abyss.  
+Use of third-party tools with Black Desert Online is subject to Pearl Abyss' Terms of Service and policies.

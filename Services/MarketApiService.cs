@@ -255,7 +255,7 @@ public sealed class MarketApiService
             int index = 0;
             foreach (JsonElement child in element.EnumerateArray())
             {
-                if (TryBuildSpot(child, fallbackKey ?? $"spot_{index}", out GrindSpotRecord? spot))
+                if (TryBuildSpot(child, fallbackKey ?? $"spot_{index}", out GrindSpotRecord? spot) && spot is not null)
                     output.Add(spot);
                 else
                     ParseSpotCollection(child, output, fallbackKey);
@@ -280,7 +280,7 @@ public sealed class MarketApiService
             }
         }
 
-        if (TryBuildSpot(element, fallbackKey ?? string.Empty, out GrindSpotRecord? directSpot))
+        if (TryBuildSpot(element, fallbackKey ?? string.Empty, out GrindSpotRecord? directSpot) && directSpot is not null)
         {
             output.Add(directSpot);
             return;
@@ -293,7 +293,8 @@ public sealed class MarketApiService
                 continue;
 
             if (property.Value.ValueKind == JsonValueKind.Object &&
-                TryBuildSpot(property.Value, property.Name, out GrindSpotRecord? keyedSpot))
+                TryBuildSpot(property.Value, property.Name, out GrindSpotRecord? keyedSpot) &&
+                keyedSpot is not null)
             {
                 output.Add(keyedSpot);
             }

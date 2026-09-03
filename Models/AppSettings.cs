@@ -11,6 +11,10 @@ public sealed class AppSettings
     public string DatabasePath { get; set; } = string.Empty;
     public string GarmothApiKey { get; set; } = string.Empty;
 
+    // Optional live-loot filter. When enabled, only item IDs present in the
+    // locally cached Garmoth grind-spot drop list are tracked.
+    public bool OnlyTrackGarmothItems { get; set; } = true;
+
     // Remembers whether the right-side live loot list was collapsed.
     public bool LootPanelCollapsed { get; set; }
 
@@ -19,6 +23,8 @@ public sealed class AppSettings
     public string OverlayMode { get; set; } = "Detailed";
     public double OverlayBackgroundOpacity { get; set; } = 0.85;
     public int OverlayMaxDisplayedItems { get; set; } = 8;
+    // Shared loot-list sorting. Kept under the existing Overlay* setting names
+    // for backwards compatibility; it now controls both main screen and overlay.
     public string OverlaySortBy { get; set; } = "Quantity";
     public bool OverlaySortDescending { get; set; } = true;
     public double OverlayLeft { get; set; } = 30;
@@ -34,4 +40,8 @@ public sealed class AppSettings
 
     // Used by the styled What's New dialog so each version is shown once.
     public string LastSeenChangelogVersion { get; set; } = string.Empty;
+
+    // Written immediately before Velopack restarts into an update. This makes
+    // the post-update What's New dialog reliable even across updater restarts.
+    public string PendingChangelogVersion { get; set; } = string.Empty;
 }

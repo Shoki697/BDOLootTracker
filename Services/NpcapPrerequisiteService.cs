@@ -48,6 +48,32 @@ public static class NpcapPrerequisiteService
         }
     }
 
+    public static string? GetInstalledVersion()
+    {
+        try
+        {
+            string systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
+            string npcapDirectory = Path.Combine(systemDirectory, "Npcap");
+
+            foreach (string fileName in new[] { "wpcap.dll", "Packet.dll" })
+            {
+                string path = Path.Combine(npcapDirectory, fileName);
+                if (!File.Exists(path))
+                    continue;
+
+                string? version = FileVersionInfo.GetVersionInfo(path).FileVersion;
+                if (!string.IsNullOrWhiteSpace(version))
+                    return version.Trim();
+            }
+        }
+        catch
+        {
+            // Version text is diagnostic only. Installation detection still works.
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Shows a first-run / Start-button prerequisite warning and optionally
     /// opens the official Npcap download page. Npcap is not bundled with the
