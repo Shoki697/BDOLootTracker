@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
+using BDOLootTracker.Models;
 using PacketDotNet;
 using SharpPcap;
 
@@ -6,16 +8,41 @@ namespace BDOLootTracker.Services;
 
 public sealed class CaptureService : IDisposable
 {
-    private const ushort BdoServerPort = 8889;
-
     private readonly Dictionary<ushort, BdoConnection> _connections = new();
     private ICaptureDevice? _device;
+    private ParserProfile _parserProfile;
+    private long _serverPayloadBytes;
+    private long _validLootCount;
+    private long _lastServerPacketTicks;
+    private long _lastValidLootTicks;
+
+    public CaptureService()
+    {
+        // Local-only fallback; MainWindow replaces this with the active cached
+        // profile before each session starts.
+        using var profileService = new ParserProfileService();
+        _parserProfile = profileService.LoadActiveProfile();
+    }
 
     public bool IsRunning { get; private set; }
+    public long ServerPayloadBytesReceived => Interlocked.Read(ref _serverPayloadBytes);
+    public long ValidLootCount => Interlocked.Read(ref _validLootCount);
+    public DateTime? LastServerPacketUtc => ToUtcDateTime(Interlocked.Read(ref _lastServerPacketTicks));
+    public DateTime? LastValidLootUtc => ToUtcDateTime(Interlocked.Read(ref _lastValidLootTicks));
+    public string ActiveProfileVersion => _parserProfile.ProfileVersion;
 
     public event Action<uint, ulong>? LootReceived;
     public event Action<string>? StatusChanged;
     public event Action<Exception>? CaptureError;
+
+    public void ConfigureParser(ParserProfile profile)
+    {
+        if (IsRunning)
+            throw new InvalidOperationException("The parser profile cannot be changed while packet capture is running.");
+
+        ParserProfileService.ValidateProfile(profile);
+        _parserProfile = profile;
+    }
 
     public void Start(string adapterName)
     {
@@ -29,14 +56,19 @@ public sealed class CaptureService : IDisposable
             throw new InvalidOperationException("The selected network adapter could not be found.");
 
         _connections.Clear();
+        Interlocked.Exchange(ref _serverPayloadBytes, 0);
+        Interlocked.Exchange(ref _validLootCount, 0);
+        Interlocked.Exchange(ref _lastServerPacketTicks, 0);
+        Interlocked.Exchange(ref _lastValidLootTicks, 0);
+
         _device = device;
         _device.OnPacketArrival += OnPacketArrival;
         _device.Open(DeviceModes.Promiscuous, read_timeout: 1000);
-        _device.Filter = $"tcp src port {BdoServerPort}";
+        _device.Filter = $"tcp src port {_parserProfile.ServerPort}";
         _device.StartCapture();
 
         IsRunning = true;
-        StatusChanged?.Invoke("Connected");
+        StatusChanged?.Invoke($"Connected • parser {_parserProfile.ProfileVersion}");
     }
 
     public void Stop()
@@ -71,19 +103,22 @@ public sealed class CaptureService : IDisposable
             var packet = Packet.ParsePacket(rawPacket.LinkLayerType, rawPacket.Data);
             var tcp = packet.Extract<TcpPacket>();
 
-            if (tcp == null || tcp.SourcePort != BdoServerPort)
+            if (tcp == null || tcp.SourcePort != _parserProfile.ServerPort)
                 return;
 
             var payload = tcp.PayloadData;
             if (payload == null || payload.Length == 0)
                 return;
 
+            Interlocked.Add(ref _serverPayloadBytes, payload.Length);
+            Interlocked.Exchange(ref _lastServerPacketTicks, DateTime.UtcNow.Ticks);
+
             ushort streamId = tcp.DestinationPort;
 
             if (!_connections.TryGetValue(streamId, out var connection))
             {
-                connection = new BdoConnection();
-                connection.Parser.LootReceived += (itemId, quantity) => LootReceived?.Invoke(itemId, quantity);
+                connection = new BdoConnection(_parserProfile);
+                connection.Parser.LootReceived += Parser_LootReceived;
                 _connections[streamId] = connection;
             }
 
@@ -98,12 +133,27 @@ public sealed class CaptureService : IDisposable
         }
     }
 
+    private void Parser_LootReceived(uint itemId, ulong quantity)
+    {
+        Interlocked.Increment(ref _validLootCount);
+        Interlocked.Exchange(ref _lastValidLootTicks, DateTime.UtcNow.Ticks);
+        LootReceived?.Invoke(itemId, quantity);
+    }
+
     public void Dispose() => Stop();
+
+    private static DateTime? ToUtcDateTime(long ticks)
+        => ticks <= 0 ? null : new DateTime(ticks, DateTimeKind.Utc);
 
     private sealed class BdoConnection
     {
+        public BdoConnection(ParserProfile profile)
+        {
+            Parser = new BdoLootParser(profile);
+        }
+
         public TcpStreamReassembler Reassembler { get; } = new();
-        public BdoLootParser Parser { get; } = new();
+        public BdoLootParser Parser { get; }
     }
 
     private sealed class TcpStreamReassembler
@@ -201,17 +251,20 @@ public sealed class CaptureService : IDisposable
 
     private sealed class BdoLootParser
     {
-        private static readonly byte[] LootSignature = { 0x00, 0x01, 0x00, 0xE0 };
-        // Observed in controlled Storage / Transaction Maid withdrawals immediately
-        // before the inventory-update signature. This keeps the stable loot parser
-        // intact while suppressing only the tested transfer form.
-        private static readonly byte[] StorageTransferPrefix = { 0x06, 0x00, 0x00, 0xE7, 0x12, 0x02 };
-        private const int MinimumLootDataLength = 42;
-        private const uint MaxReasonableItemId = 10_000_000;
-
+        private readonly ParserProfile _profile;
+        private readonly byte[] _signature;
+        private readonly List<byte[]> _suppressPrefixes;
         private readonly List<byte> _buffer = new();
-        private bool _candidatePending;
-        private bool _suppressCurrentCandidate;
+
+        public BdoLootParser(ParserProfile profile)
+        {
+            _profile = profile;
+            _signature = ParserProfileService.ParseHex(profile.Signature);
+            _suppressPrefixes = (profile.SuppressIfPrecededBy ?? new List<string>())
+                .Select(ParserProfileService.ParseHex)
+                .Where(x => x.Length > 0)
+                .ToList();
+        }
 
         public event Action<uint, ulong>? LootReceived;
 
@@ -228,96 +281,130 @@ public sealed class CaptureService : IDisposable
         {
             while (true)
             {
-                int signaturePosition = FindLootSignature();
-
+                int signaturePosition = FindSignature();
                 if (signaturePosition < 0)
                 {
-                    // Keep enough trailing bytes to recognize both a split loot signature and
-                    // the tested Storage/Maid prefix when a TCP payload boundary falls
-                    // between the prefix and the signature.
-                    int keepBytes = StorageTransferPrefix.Length + LootSignature.Length - 1;
-                    if (_buffer.Count > keepBytes)
-                        _buffer.RemoveRange(0, _buffer.Count - keepBytes);
+                    TrimWhenNoSignature();
                     return;
                 }
 
-                if (!_candidatePending)
+                int candidateStart = signaturePosition - _profile.SignatureOffset;
+                if (candidateStart < 0)
                 {
-                    _suppressCurrentCandidate = IsStorageTransferPrefix(signaturePosition);
-                    _candidatePending = true;
+                    // Capture started in the middle of an application packet.
+                    // Skip this incomplete signature and resynchronize on the next one.
+                    _buffer.RemoveRange(0, signaturePosition + 1);
+                    continue;
                 }
 
-                if (signaturePosition > 0)
-                    _buffer.RemoveRange(0, signaturePosition);
+                bool suppress = IsSuppressed(candidateStart);
 
-                if (_buffer.Count < MinimumLootDataLength)
+                if (candidateStart > 0)
+                    _buffer.RemoveRange(0, candidateStart);
+
+                if (_buffer.Count < _profile.MinimumLength)
                     return;
 
-                ParseLootCandidate(_suppressCurrentCandidate);
+                int packetLength = ReadPacketLength();
+                if (packetLength < _profile.MinimumLength || packetLength > _profile.MaximumPacketLength)
+                {
+                    // False-positive signature. Advance one byte and rescan.
+                    _buffer.RemoveAt(0);
+                    continue;
+                }
 
-                _candidatePending = false;
-                _suppressCurrentCandidate = false;
+                if (_buffer.Count < packetLength)
+                    return;
 
-                // A stabil tesztverzió logikája: csak a 4 byte-os signature-t lépjük át,
-                // így közeli loot eseményt sem tudunk kihagyni.
-                _buffer.RemoveRange(0, LootSignature.Length);
+                uint itemId = BinaryPrimitives.ReadUInt32LittleEndian(
+                    CollectionsMarshal.AsSpan(_buffer).Slice(_profile.ItemIdOffset, 4));
+                ulong quantity = BinaryPrimitives.ReadUInt64LittleEndian(
+                    CollectionsMarshal.AsSpan(_buffer).Slice(_profile.QuantityOffset, 8));
+
+                if (!suppress &&
+                    itemId > 0 && itemId <= _profile.MaxReasonableItemId &&
+                    quantity > 0 && quantity <= _profile.MaxReasonableQuantity)
+                {
+                    LootReceived?.Invoke(itemId, quantity);
+                }
+
+                _buffer.RemoveRange(0, packetLength);
             }
         }
 
-        private int FindLootSignature()
+        private int FindSignature()
         {
-            if (_buffer.Count < LootSignature.Length)
+            if (_buffer.Count < _signature.Length)
                 return -1;
 
-            for (int i = 0; i <= _buffer.Count - LootSignature.Length; i++)
+            for (int i = 0; i <= _buffer.Count - _signature.Length; i++)
             {
-                if (_buffer[i] == LootSignature[0] &&
-                    _buffer[i + 1] == LootSignature[1] &&
-                    _buffer[i + 2] == LootSignature[2] &&
-                    _buffer[i + 3] == LootSignature[3])
+                bool match = true;
+                for (int j = 0; j < _signature.Length; j++)
+                {
+                    if (_buffer[i + j] == _signature[j])
+                        continue;
+
+                    match = false;
+                    break;
+                }
+
+                if (match)
                     return i;
             }
 
             return -1;
         }
 
-        private bool IsStorageTransferPrefix(int signaturePosition)
+        private int ReadPacketLength()
         {
-            if (signaturePosition < StorageTransferPrefix.Length)
-                return false;
-
-            int start = signaturePosition - StorageTransferPrefix.Length;
-            for (int i = 0; i < StorageTransferPrefix.Length; i++)
+            int length = 0;
+            for (int i = 0; i < _profile.PacketLengthBytes; i++)
             {
-                if (_buffer[start + i] != StorageTransferPrefix[i])
-                    return false;
+                int index = _profile.PacketLengthOffset + i;
+                if (index >= _buffer.Count)
+                    return 0;
+
+                length |= _buffer[index] << (8 * i);
             }
 
-            return true;
+            return length;
         }
 
-        private void ParseLootCandidate(bool suppress)
+        private bool IsSuppressed(int candidateStart)
         {
-            Span<byte> itemBytes = stackalloc byte[4];
-            Span<byte> quantityBytes = stackalloc byte[8];
+            foreach (byte[] prefix in _suppressPrefixes)
+            {
+                if (candidateStart < prefix.Length)
+                    continue;
 
-            for (int i = 0; i < 4; i++)
-                itemBytes[i] = _buffer[30 + i];
+                int start = candidateStart - prefix.Length;
+                bool match = true;
+                for (int i = 0; i < prefix.Length; i++)
+                {
+                    if (_buffer[start + i] == prefix[i])
+                        continue;
 
-            for (int i = 0; i < 8; i++)
-                quantityBytes[i] = _buffer[34 + i];
+                    match = false;
+                    break;
+                }
 
-            uint itemId = BinaryPrimitives.ReadUInt32LittleEndian(itemBytes);
-            ulong quantity = BinaryPrimitives.ReadUInt64LittleEndian(quantityBytes);
+                if (match)
+                    return true;
+            }
 
-            if (itemId == 0 || itemId > MaxReasonableItemId)
-                return;
+            return false;
+        }
 
-            if (quantity == 0 || quantity > 10_000_000_000UL)
-                return;
+        private void TrimWhenNoSignature()
+        {
+            int maxPrefix = _suppressPrefixes.Count == 0 ? 0 : _suppressPrefixes.Max(x => x.Length);
+            int keep = Math.Max(
+                _profile.SignatureOffset + _signature.Length - 1 + maxPrefix,
+                _profile.MinimumLength - 1);
 
-            if (!suppress)
-                LootReceived?.Invoke(itemId, quantity);
+            if (_buffer.Count > keep)
+                _buffer.RemoveRange(0, _buffer.Count - keep);
         }
     }
 }

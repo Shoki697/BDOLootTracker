@@ -8,9 +8,9 @@
     <UseWindowsForms>true</UseWindowsForms>
     <StartupObject>BDOLootTracker.App</StartupObject>
     <ApplicationIcon>Resources\AppIcon.ico</ApplicationIcon>
-    <Version>0.13.0</Version>
-    <AssemblyVersion>0.13.0.0</AssemblyVersion>
-    <FileVersion>0.13.0.0</FileVersion>
+    <Version>0.14.0</Version>
+    <AssemblyVersion>0.14.0.0</AssemblyVersion>
+    <FileVersion>0.14.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,6 +31,7 @@
     <Resource Include="Resources\AppIcon.ico" />
     <Resource Include="Resources\HeaderLogo.png" />
     <EmbeddedResource Include="Resources\changelog.json" />
+    <EmbeddedResource Include="Resources\parser-default.json" />
   </ItemGroup>
 
   <ItemGroup>

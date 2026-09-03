@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "profileVersion": "EU-2026.09.03.1",
+  "region": "EU",
+  "serverPort": 8889,
+  "signature": "1E 16 01",
+  "signatureOffset": 3,
+  "packetLengthOffset": 0,
+  "packetLengthBytes": 3,
+  "maximumPacketLength": 2000000,
+  "itemIdOffset": 28,
+  "quantityOffset": 32,
+  "minimumLength": 40,
+  "maxReasonableItemId": 10000000,
+  "maxReasonableQuantity": 10000000000,
+  "suppressIfPrecededBy": [
+    "06 00 00 E7 12 02"
+  ]
+}

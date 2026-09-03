@@ -16,6 +16,7 @@ public partial class SettingsWindow : Window
 
     private readonly SettingsService _settingsService;
     private readonly DatabaseFetchService _fetchService = new();
+    private readonly ParserProfileService _parserProfileService = new();
     private AppSettings _settings;
     private ClassIconService? _classIconService;
     private bool _isLoading = true;
@@ -38,6 +39,7 @@ public partial class SettingsWindow : Window
         RefreshDatabaseStatus();
         RefreshIgnoreList();
         RefreshNpcapStatus();
+        RefreshParserStatusLocal();
         ShowTab(NetworkTabButton, NetworkSection);
         UpdateSaveButtonState();
 
@@ -46,6 +48,7 @@ public partial class SettingsWindow : Window
         {
             _classIconService?.Dispose();
             _fetchService.Dispose();
+            _parserProfileService.Dispose();
         };
     }
 
@@ -441,6 +444,140 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void RefreshParserStatusLocal()
+    {
+        try
+        {
+            ParserProfile profile = _parserProfileService.LoadActiveProfile(out string source);
+            ParserProfile? lastKnownGood = _parserProfileService.LoadLastKnownGood();
+            string sampleVersion = _parserProfileService.GetLocalSampleVersion();
+            string lastGoodText = lastKnownGood == null
+                ? "Last-known-good: not established yet"
+                : $"Last-known-good: {lastKnownGood.ProfileVersion}";
+
+            ParserStatusText.Text = $"Ready • {profile.ProfileVersion}";
+            ParserStatusText.Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94));
+            ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94));
+            ParserDetailsText.Text =
+                $"Profile source: {source} • {lastGoodText} • Server port: {profile.ServerPort} • " +
+                $"Signature: {profile.Signature} • Item offset: {profile.ItemIdOffset} • Quantity offset: {profile.QuantityOffset}. " +
+                (string.IsNullOrWhiteSpace(sampleVersion)
+                    ? "No cached packet sample. Remote status has not been checked."
+                    : $"Cached packet sample: {sampleVersion}. Remote status has not been checked.");
+        }
+        catch (Exception ex)
+        {
+            ParserStatusText.Text = "Local profile problem";
+            ParserStatusText.Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+            ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(248, 113, 113));
+            ParserDetailsText.Text = ex.Message;
+        }
+    }
+
+    private async void ParserDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        SetParserButtonsEnabled(false);
+        ParserStatusText.Text = "Running diagnostics...";
+        ParserStatusText.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+        ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+
+        try
+        {
+            RefreshNpcapStatus();
+            ParserDiagnosticsResult result = await _parserProfileService.RunDiagnosticsAsync();
+            ApplyParserDiagnosticsResult(result, "Diagnostics");
+        }
+        finally
+        {
+            SetParserButtonsEnabled(true);
+        }
+    }
+
+    private async void ParserCheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        SetParserButtonsEnabled(false);
+        ParserStatusText.Text = "Checking parser update...";
+        ParserStatusText.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+        ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+
+        try
+        {
+            ParserDiagnosticsResult result = await _parserProfileService.EnsureLatestProfileAsync();
+            ApplyParserDiagnosticsResult(result, "Parser update");
+        }
+        finally
+        {
+            SetParserButtonsEnabled(true);
+        }
+    }
+
+    private async void ParserAutoRepair_Click(object sender, RoutedEventArgs e)
+    {
+        SetParserButtonsEnabled(false);
+        ParserStatusText.Text = "Running Auto Repair...";
+        ParserStatusText.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+        ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+
+        try
+        {
+            ParserDiagnosticsResult result = await _parserProfileService.AutoRepairAsync();
+            ApplyParserDiagnosticsResult(result, "Auto Repair");
+
+            MessageBox.Show(
+                result.Message + "\n\nThe active parser file is used the next time packet capture starts.",
+                "Loot Parser Auto Repair",
+                MessageBoxButton.OK,
+                result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        finally
+        {
+            SetParserButtonsEnabled(true);
+        }
+    }
+
+    private void ApplyParserDiagnosticsResult(ParserDiagnosticsResult result, string operation)
+    {
+        bool healthy = result.Success && !result.RemoteProfileAvailable;
+        bool warning = result.Success && result.RemoteProfileAvailable;
+
+        ParserStatusText.Text = result.ProfileUpdated
+            ? $"Updated • {result.ActiveProfile.ProfileVersion}"
+            : warning
+                ? $"Update available • {result.RemoteProfileVersion}"
+                : result.Success
+                    ? $"Ready • {result.ActiveProfile.ProfileVersion}"
+                    : $"{operation} could not complete";
+
+        Color color = healthy || result.ProfileUpdated
+            ? Color.FromRgb(34, 197, 94)
+            : warning
+                ? Color.FromRgb(251, 191, 36)
+                : Color.FromRgb(248, 113, 113);
+
+        ParserStatusText.Foreground = new SolidColorBrush(color);
+        ParserHealthDot.Foreground = new SolidColorBrush(color);
+
+        string remote = string.IsNullOrWhiteSpace(result.RemoteProfileVersion)
+            ? "Remote profile: unavailable"
+            : $"Remote profile: {result.RemoteProfileVersion}";
+
+        string sample = string.IsNullOrWhiteSpace(result.RemoteSampleVersion)
+            ? "Remote packet sample: none"
+            : result.NewSampleAvailable
+                ? $"Remote packet sample: {result.RemoteSampleVersion} (new)"
+                : $"Remote packet sample: {result.RemoteSampleVersion}";
+
+        ParserDetailsText.Text =
+            $"Active: {result.ActiveProfile.ProfileVersion} • {result.ProfileSource} • {remote} • {sample}. {result.Message}";
+    }
+
+    private void SetParserButtonsEnabled(bool enabled)
+    {
+        ParserDiagnosticsButton.IsEnabled = enabled;
+        ParserCheckUpdateButton.IsEnabled = enabled;
+        ParserAutoRepairButton.IsEnabled = enabled;
+    }
+
     private void DatabaseOption_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (!_isLoading && !_isFetching)
@@ -746,6 +883,9 @@ public partial class SettingsWindow : Window
         AdapterCombo.IsEnabled = enabled;
         RefreshAdaptersButton.IsEnabled = enabled;
         RecheckNpcapButton.IsEnabled = enabled;
+        ParserDiagnosticsButton.IsEnabled = enabled;
+        ParserCheckUpdateButton.IsEnabled = enabled;
+        ParserAutoRepairButton.IsEnabled = enabled;
         RegionCombo.IsEnabled = enabled;
         LanguageCombo.IsEnabled = enabled;
         DatabasePathBox.IsEnabled = enabled;

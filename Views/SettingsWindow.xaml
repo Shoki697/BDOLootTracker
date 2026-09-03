@@ -186,6 +186,68 @@
                                        Margin="0,8,0,0" />
                         </Grid>
                     </Border>
+
+                    <Border Margin="0,12,0,0"
+                            Padding="14"
+                            Background="#0D151D"
+                            BorderBrush="{StaticResource Border}"
+                            BorderThickness="1"
+                            CornerRadius="7">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="LOOT PARSER"
+                                               Foreground="{StaticResource Muted}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock x:Name="ParserStatusText"
+                                               Text="Local profile loaded"
+                                               FontWeight="SemiBold"
+                                               Margin="0,5,0,0" />
+                                </StackPanel>
+
+                                <TextBlock x:Name="ParserHealthDot"
+                                           Grid.Column="1"
+                                           Text="●"
+                                           Foreground="#22C55E"
+                                           FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+
+                            <TextBlock x:Name="ParserDetailsText"
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,0" />
+
+                            <WrapPanel Margin="0,12,0,0">
+                                <Button x:Name="ParserDiagnosticsButton"
+                                        Content="Diagnostics"
+                                        Margin="0,0,8,8"
+                                        Click="ParserDiagnostics_Click" />
+                                <Button x:Name="ParserCheckUpdateButton"
+                                        Content="Check for parser update"
+                                        Margin="0,0,8,8"
+                                        Click="ParserCheckUpdate_Click" />
+                                <Button x:Name="ParserAutoRepairButton"
+                                        Content="Auto Repair"
+                                        Margin="0,0,0,8"
+                                        Background="#1266A8"
+                                        Click="ParserAutoRepair_Click" />
+                            </WrapPanel>
+
+                            <TextBlock Text="Parser checks do not run when the application simply starts. Remote checks happen only when a session is started or when you use the buttons above."
+                                       Foreground="{StaticResource Muted}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap"
+                                       Margin="0,2,0,0" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

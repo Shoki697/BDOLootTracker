@@ -1,55 +1,118 @@
-# BDO Loot Tracker — v0.13.0 Dev Test
+# BDO Loot Tracker — v0.14.0 Dev Notes
 
-This dev package continues from v0.12.0 Settings Tabs.
+## 2026-09-03 BDO packet hotfix
 
-## Included
+The post-maintenance capture showed that the BDO server connection is still TCP source port `8889`, but the loot packet changed.
 
-- Main-window Garmoth quick upload:
-  - New Garmoth panel directly below STOP
-  - Uploads the most recent completed session
-  - Disabled while tracking / while an upload is running
-  - Existing Session History upload remains available
-- Live update notification:
-  - Silent update check on startup
-  - Re-check every 30 minutes while the tracker is running
-  - Small `Update available • vX.Y.Z` button in the bottom status bar
-  - Clicking it downloads the newest Velopack update and restarts the app
-  - An active session is stopped/saved before update installation
-- Changelog restart fix:
-  - The target update version is saved as `PendingChangelogVersion` before restart
-  - After the updated executable starts, What's New is forced once for that version
-  - Closing What's New marks it as seen and clears the pending marker
-- Optional Garmoth loot filter:
-  - Settings → Garmoth → `Show and track only loot items known by Garmoth`
-  - Enabled by default for new/migrated settings
-  - Uses the local `GrindSpotDrops` cache populated by Fetch / Update Database
-  - If the Garmoth drop cache is empty/unavailable, tracking fails open and keeps all loot rather than losing a session
-- Shared loot sorting:
-  - Quantity / Last Looted / Total Value / Unit Price
-  - Ascending / Descending
-  - The same setting now controls both the main-screen Loot List and the overlay
-- Npcap diagnostics in Settings → Network:
-  - Installed / not installed
-  - File version when detectable
-  - Capture adapter availability / Ready state
-  - Recheck button
+Observed post-patch loot packet:
 
-## Suggested test order
+- application packet length: 3-byte little-endian value at offset `0`
+- loot signature: `1E 16 01` at offset `3`
+- item ID: uint32 little-endian at offset `28`
+- quantity: uint64 little-endian at offset `32`
+- observed packet length: `254` bytes
 
-1. Open Settings → Network and confirm Npcap reports `Installed • Ready` on a working PC. Press Recheck.
-2. Open Settings → Garmoth and verify the new Garmoth-only loot checkbox saves/restores correctly.
-3. With the checkbox ON, run Fetch / Update Database once, start a test session, and verify unrelated packet item IDs do not appear.
-4. Turn the checkbox OFF, start a new session, and verify all detected loot behaves like the previous version.
-5. Change Overlay → Loot list sort by / Sort order and save. Confirm the main Loot List and overlay use exactly the same ordering.
-6. Complete a short session. Confirm `UPLOAD LAST SESSION` becomes enabled under STOP.
-7. Upload the latest completed session from the main window and verify the confirmation + success/error handling.
-8. Confirm the existing upload button in Session History still works.
-9. Test update UI from an installed Velopack build with a newer GitHub release available. The bottom status bar should show the update button without a startup popup.
-10. Click the update button. If tracking is active, confirm the session is saved/stopped before installation.
-11. After updater restart, confirm What's New opens automatically for the newly installed version exactly once.
-12. Restart again and confirm What's New does not appear a second time.
+Validated against the supplied capture using these visible in-game events:
 
-## Notes
+- Silver x490 -> item 1 / qty 490
+- Elaborate Metal Part x2 -> item 44187 / qty 2
+- Silver x461 -> item 1 / qty 461
+- Elaborate Metal Part x1 -> item 44187 / qty 1
+- Silver x1038 -> item 1 / qty 1038
+- Silver x1021 -> item 1 / qty 1021
+- Grunil Defense Gear Box x1 -> item 757470 / qty 1
 
-- Automatic update UI is intentionally hidden when running directly from Visual Studio/bin/publish because Velopack reports that build as not installed.
-- The Garmoth-only filter uses locally cached Garmoth grind-spot drop relationships. Run Fetch / Update Database before evaluating the filter.
+## Parser Recovery System
+
+Parser constants are no longer hard-coded as the only source of truth.
+
+### Built-in fallback
+
+`Resources/parser-default.json` is embedded in the executable and is loaded without network access.
+
+### GitHub parser files
+
+- `parser/manifest.json`
+- `parser/eu-current.json`
+- `parser/samples/`
+
+The manifest includes the current profile URL and SHA-256. Remote JSON is treated only as data; no downloaded code is executed.
+
+### When remote parser checks happen
+
+Parser checks intentionally **do not run on normal application startup**.
+
+They run only when:
+
+1. the user presses `START` to begin a session, or
+2. the user explicitly uses `Settings -> Network -> Diagnostics / Check for parser update / Auto Repair`.
+
+If GitHub is unavailable when START is pressed, tracking continues with the current local/built-in profile.
+
+### Auto Repair
+
+Auto Repair:
+
+1. downloads the manifest,
+2. downloads the current parser JSON,
+3. verifies SHA-256,
+4. validates parser schema/offsets,
+5. writes `active-profile.json`,
+6. stores `last-known-good.json`,
+7. optionally downloads a newer pcapng diagnostic sample when configured in the manifest.
+
+If repair fails, the service rolls back to `last-known-good.json` when available.
+
+Local parser state is stored under:
+
+`%LOCALAPPDATA%\BDOLootTracker\parser\`
+
+## Parser health popup
+
+During an active session only, the tracker performs a conservative local health heuristic.
+
+A warning can appear when:
+
+- the session has been active for at least 6 minutes,
+- at least 5 MB of BDO server payload has been captured,
+- zero valid loot events have been decoded.
+
+The popup offers:
+
+- Later
+- Diagnostics
+- Auto Repair
+
+This warning is shown at most once per session.
+
+## Network Settings
+
+The Network tab now contains two diagnostic areas:
+
+- Npcap status
+- Loot Parser status
+
+Parser controls:
+
+- Diagnostics — checks remote metadata without changing the active parser
+- Check for parser update — installs a newer JSON profile if available
+- Auto Repair — force-downloads and validates the current remote profile and performs rollback on failure
+
+Opening Settings alone does not contact GitHub for parser diagnostics.
+
+## pcapng fallback
+
+For a larger BDO protocol change that cannot be described by the current JSON schema, capture a new `.pcapng` and publish it separately. Update `sampleVersion`, `sampleUrl`, and `sampleSha256` in `parser/manifest.json`.
+
+The application can detect a newer sample and Auto Repair can cache it for diagnostics. Diagnostics then performs a conservative raw-capture validation and reports how many valid loot candidates the active profile finds in the cached sample. A packet sample is not executable and does not magically guarantee decoding of an arbitrary new protocol; a compatible JSON profile/parser schema may still need to be published.
+
+## Release checklist
+
+- Build solution in Visual Studio / `dotnet build`.
+- Confirm Silver and normal item loot are detected.
+- Confirm Garmoth-only filter still works both enabled/disabled.
+- Confirm storage/maid transfer suppression has not regressed; the new packet format should be re-tested specifically for transfers.
+- Confirm START performs the parser check but app launch alone does not.
+- Confirm Network Diagnostics performs the remote parser check.
+- Confirm Auto Repair creates `%LOCALAPPDATA%\BDOLootTracker\parser\active-profile.json` and `last-known-good.json`.
+- Push `parser/manifest.json` and `parser/eu-current.json` to GitHub `main` before release so installed clients can retrieve the profile.

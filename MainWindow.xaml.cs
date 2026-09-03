@@ -65,6 +65,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private readonly SettingsService _settingsService = new();
     private readonly AppUpdateService _appUpdateService = new();
+    private readonly ParserProfileService _parserProfileService = new();
     private readonly CaptureService _captureService = new();
     private DatabaseService _database;
     private GarmothUploadService _garmothUploadService;
@@ -83,6 +84,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isCheckingForUpdate;
     private bool _isInstallingUpdate;
     private AppUpdateService.AvailableUpdateInfo? _availableUpdate;
+    private ParserProfile _activeParserProfile = new();
+    private bool _parserProfileConfirmedThisSession;
+    private bool _parserRecoveryPromptShown;
+    private DateTime _nextParserHealthCheckUtc = DateTime.MinValue;
 
     private readonly Dictionary<uint, LootRowViewModel> _rowsById = new();
     private readonly Dictionary<uint, ulong> _sessionLoot = new();
@@ -260,6 +265,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SourceInitialized += MainWindow_SourceInitialized;
 
         _settings = _settingsService.Load();
+        // Local-only parser load. No GitHub/parser health check is performed at app startup.
+        _activeParserProfile = _parserProfileService.LoadActiveProfile();
+        _captureService.ConfigureParser(_activeParserProfile);
         _database = new DatabaseService(_settings.DatabasePath);
         _iconCache = new IconCacheService(_database);
         _garmothUploadService = new GarmothUploadService(_database);
@@ -298,6 +306,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             StopSession(saveSession: true);
             CloseOverlayWindow();
             _captureService.Dispose();
+            _parserProfileService.Dispose();
             _garmothUploadService.Dispose();
             _iconCache.Dispose();
         };
@@ -479,7 +488,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void Start_Click(object sender, RoutedEventArgs e)
+    private async void Start_Click(object sender, RoutedEventArgs e)
     {
         if (_captureService.IsRunning)
             return;
@@ -504,6 +513,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
+        // Parser self-checks are intentionally triggered only by START or the
+        // explicit Diagnostics button in Settings. Application startup never
+        // performs this remote check.
+        StartButton.IsEnabled = false;
+        StatusText = "Checking loot parser profile...";
+        ParserDiagnosticsResult parserCheck = await _parserProfileService.EnsureLatestProfileAsync();
+        _activeParserProfile = parserCheck.ActiveProfile;
+
+        try
+        {
+            _captureService.ConfigureParser(_activeParserProfile);
+        }
+        catch (Exception ex)
+        {
+            StartButton.IsEnabled = true;
+            MessageBox.Show(ex.Message, "Parser profile error", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
         try
         {
             EnsureDatabaseServicesMatchSettings();
@@ -518,6 +546,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             _sessionStartedUtc = DateTime.UtcNow;
             _stoppedElapsed = TimeSpan.Zero;
+            _parserProfileConfirmedThisSession = false;
+            _parserRecoveryPromptShown = false;
+            _nextParserHealthCheckUtc = DateTime.UtcNow.AddSeconds(30);
 
             CharacterClassOption? selectedClass = null;
             if (_settings.CharacterClassType != null)
@@ -641,7 +672,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void CaptureService_LootReceived(uint itemId, ulong quantity)
     {
-        Dispatcher.BeginInvoke(() => AddLoot(itemId, quantity));
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!_parserProfileConfirmedThisSession)
+            {
+                _parserProfileConfirmedThisSession = true;
+                _parserProfileService.MarkProfileAsLastKnownGood(_activeParserProfile);
+            }
+
+            AddLoot(itemId, quantity);
+        });
     }
 
     private void AddLoot(uint itemId, ulong quantity)
@@ -745,6 +785,85 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SilverPerHourText = "0";
             TrashPerHourText = "—";
         }
+
+        CheckParserHealthDuringSession();
+    }
+
+    private void CheckParserHealthDuringSession()
+    {
+        if (_sessionStartedUtc == null || !_captureService.IsRunning || _parserRecoveryPromptShown)
+            return;
+
+        DateTime now = DateTime.UtcNow;
+        if (now < _nextParserHealthCheckUtc)
+            return;
+
+        _nextParserHealthCheckUtc = now.AddSeconds(30);
+
+        // Conservative heuristic: only warn after a session has been running for
+        // several minutes, substantial BDO server traffic is present, and the
+        // parser has not produced a single valid loot event.
+        TimeSpan elapsed = now - _sessionStartedUtc.Value;
+        if (elapsed < TimeSpan.FromMinutes(6) ||
+            _captureService.ServerPayloadBytesReceived < 5_000_000 ||
+            _captureService.ValidLootCount > 0)
+        {
+            return;
+        }
+
+        _parserRecoveryPromptShown = true;
+        _ = ShowParserRecoveryPromptAsync();
+    }
+
+    private async Task ShowParserRecoveryPromptAsync()
+    {
+        var window = new ParserRecoveryWindow(
+            _activeParserProfile.ProfileVersion,
+            "BDO server traffic is active, but this session has not produced any valid loot events. If you are actively grinding, the latest game patch may have changed the loot packet format.")
+        {
+            Owner = this
+        };
+
+        window.ShowDialog();
+
+        if (window.SelectedAction == ParserRecoveryAction.Diagnostics)
+        {
+            OpenSettings();
+            return;
+        }
+
+        if (window.SelectedAction != ParserRecoveryAction.AutoRepair)
+            return;
+
+        StatusText = "Running parser Auto Repair...";
+        bool captureWasRunning = _captureService.IsRunning;
+        if (captureWasRunning)
+            _captureService.Stop();
+
+        ParserDiagnosticsResult result = await _parserProfileService.AutoRepairAsync();
+        _activeParserProfile = result.ActiveProfile;
+
+        try
+        {
+            _captureService.ConfigureParser(_activeParserProfile);
+            if (captureWasRunning && _sessionStartedUtc != null)
+                _captureService.Start(_settings.AdapterName);
+
+            StatusText = result.Success
+                ? $"Parser repaired • {_activeParserProfile.ProfileVersion}"
+                : result.Message;
+
+            MessageBox.Show(
+                result.Message,
+                result.Success ? "Parser Auto Repair" : "Parser Recovery",
+                MessageBoxButton.OK,
+                result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Parser recovery failed: {ex.Message}";
+            MessageBox.Show(ex.Message, "Parser Recovery", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void CaptureService_StatusChanged(string status)
@@ -752,7 +871,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.BeginInvoke(() =>
         {
             ConnectionText = status;
-            StatusBrush = status == "Connected" ? Brushes.LimeGreen : Brushes.Gray;
+            StatusBrush = status.StartsWith("Connected", StringComparison.OrdinalIgnoreCase) ? Brushes.LimeGreen : Brushes.Gray;
         });
     }
 

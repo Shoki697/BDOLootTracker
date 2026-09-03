@@ -52,5 +52,34 @@
         "description": "Settings → Network now shows whether Npcap is installed and whether capture adapters are visible, with a Recheck button."
       }
     ]
+  },
+  "0.14.0": {
+    "title": "What's New",
+    "changes": [
+      {
+        "title": "BDO patch loot parser hotfix",
+        "description": "Loot detection was updated for the 2026-09-03 BDO packet format. The parser now uses the new framed loot packet signature and data offsets observed in the post-maintenance capture."
+      },
+      {
+        "title": "Remote parser profiles",
+        "description": "Packet signatures, framing, offsets, server port, and safety limits now come from a JSON parser profile that can be updated independently from the application."
+      },
+      {
+        "title": "Parser Auto Repair",
+        "description": "Starting a session can fetch a newer SHA-256 verified parser profile. A last-known-good copy is kept for rollback if a repair cannot be validated."
+      },
+      {
+        "title": "Parser health warning",
+        "description": "During an active session, substantial BDO traffic with no valid loot for several minutes can trigger a recovery popup with Auto Repair and Diagnostics options."
+      },
+      {
+        "title": "Network parser diagnostics",
+        "description": "Settings → Network now shows the local parser profile and provides Diagnostics, Check for parser update, and Auto Repair. These remote checks do not run just because the app was opened."
+      },
+      {
+        "title": "Packet sample fallback",
+        "description": "The parser manifest can advertise a newer pcapng sample for larger protocol changes. Auto Repair can cache the sample for diagnostics while JSON profiles remain non-executable data."
+      }
+    ]
   }
 }

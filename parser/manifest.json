@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "latestProfileVersion": "EU-2026.09.03.1",
+  "profileUrl": "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/eu-current.json",
+  "profileSha256": "35c5a70ec2917edc3ba3cde36cef92ad83ce562040c9f82ee3f5931aa5394ae6",
+  "sampleVersion": "",
+  "sampleUrl": "",
+  "sampleSha256": "",
+  "notes": "Loot packet profile updated for the 2026-09-03 BDO patch. For a larger protocol change, upload a new capture under parser/samples and update the sample fields."
+}
