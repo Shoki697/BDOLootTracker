@@ -84,7 +84,7 @@ public static class NpcapPrerequisiteService
         if (IsInstalled())
             return true;
 
-        var result = MessageBox.Show(
+        var result = AppDialog.Show(
             "Npcap was not detected on this computer.\n\n" +
             "BDO Loot Tracker needs Npcap to capture Black Desert Online network packets. " +
             "The application can be opened without it, but loot tracking cannot be started.\n\n" +
@@ -111,7 +111,7 @@ public static class NpcapPrerequisiteService
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 $"Could not open the Npcap download page.\n\n{ex.Message}\n\n{NpcapDownloadUrl}",
                 "BDO Loot Tracker",
                 MessageBoxButton.OK,

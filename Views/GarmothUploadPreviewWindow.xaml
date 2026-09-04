@@ -1,0 +1,239 @@
+<Window x:Class="BDOLootTracker.Views.GarmothUploadPreviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Garmoth Upload"
+        Width="740"
+        Height="690"
+        MinWidth="650"
+        MinHeight="560"
+        Background="{StaticResource Bg}"
+        Foreground="{StaticResource Text}"
+        WindowStyle="None"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Custom title bar -->
+        <Grid Grid.Row="0" Background="#0F1720" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Margin="16,10">
+                <TextBlock Text="Garmoth Upload" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="Review and correct the session before upload"
+                           Foreground="{StaticResource Muted}" FontSize="10" Margin="0,2,0,0" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="×" Width="38" Height="32" Padding="0" Margin="0,7,7,7"
+                    Background="Transparent" BorderThickness="0" FontSize="19" Click="Close_Click" />
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Session summary -->
+            <Border Grid.Row="0" Style="{StaticResource PanelBorder}" Margin="0,0,0,10" Padding="14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="155" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="SpotText" FontSize="19" FontWeight="SemiBold" />
+                            <TextBlock x:Name="UploadStateText" Grid.Column="1" VerticalAlignment="Center"
+                                       Foreground="{StaticResource Green}" FontWeight="SemiBold" Margin="12,0,0,0" />
+                        </Grid>
+                        <TextBlock x:Name="SessionMetaText" Foreground="{StaticResource Muted}" Margin="0,3,0,0" />
+                        <TextBlock x:Name="AlreadyUploadedText"
+                                   Visibility="Collapsed"
+                                   Foreground="#FBBF24"
+                                   TextWrapping="Wrap"
+                                   FontSize="11"
+                                   Margin="0,9,0,0" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="DROP RATE" Foreground="{StaticResource Muted}" FontSize="10" />
+                        <Grid Margin="0,5,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="DropRateBox" HorizontalContentAlignment="Right" Padding="8,5" />
+                            <TextBlock Grid.Column="1" Text="%" Margin="6,0,0,0"
+                                       VerticalAlignment="Center" Foreground="{StaticResource Muted}" />
+                        </Grid>
+                        <TextBlock Text="Saved with the session. Garmoth's external upload API does not currently apply this value."
+                                   Foreground="{StaticResource Muted}" FontSize="9.5" TextWrapping="Wrap" Margin="0,5,0,0" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1" Background="#0D151D" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                    CornerRadius="7" Padding="9" Margin="0,0,0,10">
+                <TextBlock Text="Quantity edits below affect only this upload. The original packet-tracked session remains unchanged."
+                           Foreground="{StaticResource Muted}" FontSize="10.5" TextWrapping="Wrap" />
+            </Border>
+
+            <!-- Loot editor -->
+            <Border Grid.Row="2" Style="{StaticResource PanelBorder}" Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="12,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="SESSION LOOT" Foreground="{StaticResource Muted}" FontWeight="SemiBold" FontSize="11" />
+                        <TextBlock x:Name="LootCountText" Grid.Column="1" Foreground="{StaticResource Muted}" FontSize="11" />
+                    </Grid>
+
+                    <DataGrid x:Name="LootGrid"
+                              Grid.Row="1"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              CanUserResizeRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              RowHeaderWidth="0"
+                              RowHeight="44"
+                              ColumnHeaderHeight="34"
+                              Background="#111922"
+                              Foreground="{StaticResource Text}"
+                              BorderThickness="0"
+                              HorizontalGridLinesBrush="{StaticResource Border}"
+                              SelectionMode="Single"
+                              SelectionUnit="FullRow">
+                        <DataGrid.Resources>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background" Value="#0F1720" />
+                                <Setter Property="Foreground" Value="{StaticResource Muted}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+                                <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                <Setter Property="Padding" Value="8,6" />
+                                <Setter Property="FontSize" Value="10.5" />
+                            </Style>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="Background" Value="#111922" />
+                                <Setter Property="Foreground" Value="{StaticResource Text}" />
+                                <Setter Property="BorderThickness" Value="0" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#16212C" />
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#182838" />
+                                        <Setter Property="Foreground" Value="{StaticResource Text}" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                            <Style TargetType="DataGridCell">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Foreground" Value="{StaticResource Text}" />
+                                <Setter Property="BorderThickness" Value="0" />
+                                <Setter Property="Padding" Value="7,4" />
+                                <Setter Property="VerticalContentAlignment" Value="Center" />
+                                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="Foreground" Value="{StaticResource Text}" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.Resources>
+
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="ITEM" Width="*" MinWidth="230">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="32" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="29" Height="29" CornerRadius="4" Background="#0A1118"
+                                                    BorderBrush="{StaticResource Border}" BorderThickness="1"
+                                                    VerticalAlignment="Center">
+                                                <Image Source="{Binding IconPath}" Width="27" Height="27" Stretch="Uniform" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="11.5"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding ItemId, StringFormat='ID: {0}'}"
+                                                           Foreground="{StaticResource Muted}" FontSize="9" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTemplateColumn Header="QUANTITY" Width="105">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBox Text="{Binding QuantityText, UpdateSourceTrigger=PropertyChanged}"
+                                                 HorizontalContentAlignment="Right" Padding="6,4" FontSize="11" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTemplateColumn Header="SILVER / UNIT" Width="115">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding UnitPriceText}" Foreground="{StaticResource Text}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTemplateColumn Header="TOTAL" Width="125">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding TotalSilverText}" Foreground="{StaticResource Muted}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="3" Margin="0,11,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" Foreground="{StaticResource Muted}"
+                           VerticalAlignment="Center" TextWrapping="Wrap" FontSize="10.5" />
+                <Button Grid.Column="1" Content="Cancel" MinWidth="92" Padding="12,7" Click="Cancel_Click" />
+                <Button x:Name="UploadButton" Grid.Column="3" Content="Upload to Garmoth" MinWidth="142"
+                        Padding="12,7" Background="#1266A8" FontWeight="SemiBold" Click="Upload_Click" />
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

@@ -155,6 +155,9 @@ public sealed class DatabaseService
         EnsureColumn(connection, "Sessions", "Spec", "TEXT NULL");
         EnsureColumn(connection, "Sessions", "SpotKey", "TEXT NULL");
         EnsureColumn(connection, "Sessions", "SpotName", "TEXT NULL");
+        EnsureColumn(connection, "Sessions", "GarmothUploadedAtUtc", "TEXT NULL");
+        EnsureColumn(connection, "Sessions", "GarmothUploadCount", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(connection, "Sessions", "DropRatePercent", "INTEGER NULL");
         EnsureColumn(connection, "SessionLoot", "ItemName", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "SessionLoot", "UnitPrice", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(connection, "SessionLoot", "IsTrash", "INTEGER NOT NULL DEFAULT 0");
@@ -1293,7 +1296,10 @@ public sealed class DatabaseService
                     END
                 ), 0) AS TotalTrash,
                 COALESCE(s.SpotKey, ''),
-                COALESCE(s.SpotName, '')
+                COALESCE(s.SpotName, ''),
+                s.GarmothUploadedAtUtc,
+                COALESCE(s.GarmothUploadCount, 0),
+                s.DropRatePercent
             FROM Sessions s
             LEFT JOIN SessionLoot sl ON sl.SessionId = s.SessionId
             LEFT JOIN Items i ON i.ItemId = sl.ItemId
@@ -1346,7 +1352,10 @@ public sealed class DatabaseService
                 TotalSilver = totalSilver,
                 TotalTrash = totalTrash,
                 SpotKey = reader.GetString(11),
-                SpotName = reader.GetString(12)
+                SpotName = reader.GetString(12),
+                GarmothUploadedAtUtc = reader.IsDBNull(13) ? null : ParseDbDate(reader.GetString(13)),
+                GarmothUploadCount = reader.IsDBNull(14) ? 0 : checked((int)reader.GetInt64(14)),
+                DropRatePercent = reader.IsDBNull(15) ? null : checked((int)reader.GetInt64(15))
             });
         }
 
@@ -1493,6 +1502,41 @@ public sealed class DatabaseService
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM IgnoredItems WHERE ItemId = $id;";
         command.Parameters.AddWithValue("$id", (long)itemId);
+        command.ExecuteNonQuery();
+    }
+
+    public void MarkSessionGarmothUploaded(long sessionId, int? dropRatePercent)
+    {
+        if (sessionId <= 0)
+            return;
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE Sessions
+            SET GarmothUploadedAtUtc = $uploaded,
+                GarmothUploadCount = COALESCE(GarmothUploadCount, 0) + 1,
+                DropRatePercent = $dropRate
+            WHERE SessionId = $id;
+            """;
+        command.Parameters.AddWithValue("$id", sessionId);
+        command.Parameters.AddWithValue("$uploaded", DateTime.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$dropRate", dropRatePercent.HasValue ? (object)dropRatePercent.Value : DBNull.Value);
+        command.ExecuteNonQuery();
+    }
+
+    public void UpdateSessionDropRate(long sessionId, int? dropRatePercent)
+    {
+        if (sessionId <= 0)
+            return;
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Sessions SET DropRatePercent = $dropRate WHERE SessionId = $id;";
+        command.Parameters.AddWithValue("$id", sessionId);
+        command.Parameters.AddWithValue("$dropRate", dropRatePercent.HasValue ? (object)dropRatePercent.Value : DBNull.Value);
         command.ExecuteNonQuery();
     }
 

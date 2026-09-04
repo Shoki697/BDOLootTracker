@@ -98,5 +98,166 @@
         "description": "If a build is missing its detailed changelog entry, the tracker still confirms that the new version was installed instead of silently showing nothing. Failed changelog display attempts remain pending and retry on the next start."
       }
     ]
+  },
+  "0.15.0": {
+    "title": "What's New",
+    "changes": [
+      {
+        "title": "Startup update prompt",
+        "description": "If an update is already available when the tracker starts, a BDO Loot Tracker styled update window now offers Later or Update now. Updates discovered while the app is already running remain a small bottom-right Click here notification."
+      },
+      {
+        "title": "Consistent in-app dialogs",
+        "description": "Standard Windows message boxes used by the tracker have been replaced with a shared dark BDO Loot Tracker dialog design for information, warnings, errors, confirmations, and Yes/No/Cancel prompts."
+      },
+      {
+        "title": "Garmoth upload preview",
+        "description": "Garmoth uploads now open a review window first. Every loot quantity can be corrected for the upload without changing the original packet-tracked session, and previously uploaded sessions are clearly marked to help avoid duplicates."
+      },
+      {
+        "title": "Drop Rate field",
+        "description": "The Garmoth upload preview includes an optional Drop Rate value. The tracker tries the external API field once and, if Garmoth rejects that validation field, safely retries the session without it while keeping the value locally."
+      },
+      {
+        "title": "Session History redesign",
+        "description": "Session History is now organized by grind spot. All Spots is selected by default, spot filters update Total Silver, Silver/hr, Trash/hr and Total Time, and sessions are shown as compact expandable cards with main-loot previews."
+      },
+      {
+        "title": "Session screenshot generator",
+        "description": "Expanded session cards can generate a shareable PNG summary containing the grind spot, class/spec, duration, totals, drop rate and the complete visible loot list."
+      }
+    ]
+  },
+  "0.15.1": {
+    "title": "What's New",
+    "changes": [
+      {
+        "title": "Cleaner Garmoth upload preview",
+        "description": "The Garmoth review window is narrower and more compact, with corrected dark DataGrid row/cell styling so item names, quantities, prices and totals remain readable."
+      },
+      {
+        "title": "Drop Rate handled locally",
+        "description": "The external Garmoth session endpoint currently ignores the attempted Drop Rate field even when the request succeeds. The tracker now treats Drop Rate as local session metadata and no longer claims it was transferred to Garmoth."
+      },
+      {
+        "title": "Screenshot preview",
+        "description": "Generate Screenshot now opens an in-app preview first with Copy, Save As and Close actions instead of immediately asking for a file path."
+      },
+      {
+        "title": "Compact share card",
+        "description": "Session screenshots are narrower and denser, and the BDO Loot Tracker application icon is now shown next to the tracker name at the top of the generated image."
+      }
+    ]
+  },
+  "0.15.2": {
+    "title": "What's New",
+    "changes": [
+      {
+        "title": "Even more compact session screenshot",
+        "description": "The generated session card now uses a tighter two-row summary layout: Total Silver and Silver/hr on the first row, then Trash/hr and Drop Rate on the second row."
+      },
+      {
+        "title": "Icon-first acquired loot section",
+        "description": "Session screenshots now show acquired loot as compact icon tiles with quantity badges instead of a full text loot list, keeping the image narrower and easier to share."
+      },
+      {
+        "title": "Session actions available before expansion",
+        "description": "Upload to Garmoth, Generate Screenshot and Delete Session are now available directly on each Session History card before expanding it, right next to the expand button."
+      }
+    ]
+  },
+  "0.15.3": {
+    "title": "v0.15.x UI / Garmoth / Sessions Redesign",
+    "changes": [
+      {
+        "title": "New update experience",
+        "description": "If an update is already available when BDO Loot Tracker starts, a styled in-app prompt now offers Later or Update now. Updates discovered while the program is already running remain a compact bottom-right Update available / Click here notification."
+      },
+      {
+        "title": "Unified BDO Loot Tracker dialogs",
+        "description": "The remaining standard Windows message boxes were replaced by shared dark in-app dialogs so information, warnings, errors and confirmations match the rest of the application."
+      },
+      {
+        "title": "Garmoth upload review and editing",
+        "description": "Upload to Garmoth now opens a compact review window first. Loot quantities can be corrected for the outgoing upload without changing the original packet-tracked loot, while uploaded sessions are clearly marked with their last upload time and upload count."
+      },
+      {
+        "title": "Session Drop Rate metadata",
+        "description": "Drop Rate is now stored as local session metadata and can be edited directly from the expanded Session History card. The same saved value is reused by the Garmoth upload preview and the generated session screenshot. Unknown Drop Rate is shown as — instead of 0%."
+      },
+      {
+        "title": "Session History redesigned around grind spots",
+        "description": "Session History now starts on All Spots and includes a left-side list of grind spots you actually visited. Selecting a spot filters the session cards and recalculates Total Silver, Silver/hr, Trash/hr and Total Time for that selection."
+      },
+      {
+        "title": "Compact expandable session cards",
+        "description": "Sessions are presented as compact cards with class/spec, silver/hr, trash/hr and main-loot icon previews. Cards can still be expanded for full loot details, while Upload to Garmoth, Generate Screenshot and Delete Session are available directly before expansion."
+      },
+      {
+        "title": "Shareable session screenshot generator",
+        "description": "Generate Screenshot opens an in-app preview with Copy, Save As and Close. The share card uses the app icon, grind spot and session details, a compact two-row stat layout and icon-only acquired loot with quantity badges."
+      },
+      {
+        "title": "Sharper compact screenshots",
+        "description": "Session screenshots are now rendered at 2x resolution for cleaner text and icons while keeping the same compact card proportions. The app icon is larger and loot quantity badges were widened so values such as x12,641 fit cleanly."
+      },
+      {
+        "title": "Garmoth preview visual refinements",
+        "description": "The Garmoth upload window was tightened and its loot editor now uses consistent dark rows and cells so quantities, prices and totals remain easy to read."
+      }
+    ]
+  },
+  "0.15.4": {
+    "title": "v0.15.x UI / Garmoth / Sessions Redesign",
+    "changes": [
+      {
+        "title": "New update experience",
+        "description": "If an update is already available when BDO Loot Tracker starts, a styled in-app prompt offers Later or Update now. Updates discovered while the program is already running remain a compact bottom-right Update available / Click here notification, with background checks continuing while the app is open."
+      },
+      {
+        "title": "Reliable post-update changelog",
+        "description": "After an update and restart, the What's New window is shown reliably after the main window has rendered. Pending update markers remain until the changelog was actually displayed, and a fallback message is shown if detailed changelog data is unavailable."
+      },
+      {
+        "title": "Unified BDO Loot Tracker dialogs",
+        "description": "Standard Windows message boxes used by the tracker were replaced with shared dark in-app dialogs so information, warnings, errors and confirmations match the rest of the application."
+      },
+      {
+        "title": "Garmoth upload review and editing",
+        "description": "Upload to Garmoth now opens a compact review window first. Loot quantities can be corrected for the outgoing upload without changing the original packet-tracked loot, while previously uploaded sessions are clearly marked with their last upload time and upload count."
+      },
+      {
+        "title": "Session Drop Rate metadata",
+        "description": "Drop Rate is stored as local session metadata and can be edited directly from the expanded Session History card. The same saved value is reused by the Garmoth upload preview and generated session screenshots. Unknown Drop Rate is shown as — instead of 0%."
+      },
+      {
+        "title": "Session History redesigned around grind spots",
+        "description": "Session History starts on All Spots and includes a left-side list of grind spots you actually visited. Selecting a spot filters the session cards and recalculates Total Silver, Silver/hr, Trash/hr and Total Time for that selection."
+      },
+      {
+        "title": "Compact expandable session cards",
+        "description": "Sessions are shown as compact cards with class/spec, silver/hr, trash/hr and main-loot icon previews. Cards can still be expanded for full loot details, while Upload to Garmoth, Generate Screenshot and Delete Session are available directly before expansion."
+      },
+      {
+        "title": "Shareable session screenshot workflow",
+        "description": "Generate Screenshot opens an in-app preview with Copy, Save As and Close. The share card includes the tracker branding, grind spot and session details, a compact two-row stat layout and icon-only acquired loot with quantity badges."
+      },
+      {
+        "title": "Sharper and cleaner session cards",
+        "description": "Session screenshots render at 2x resolution for cleaner text and item icons. The card now has rounded outer corners, uses the same transparent header logo as the main window, and keeps a compact share-friendly width."
+      },
+      {
+        "title": "Refined acquired-loot badges",
+        "description": "Loot quantity labels are now smaller, more transparent and fully contained inside each item tile instead of extending beyond the item border. Values such as x12,641 remain readable while larger quantities can use compact K / M / B formatting."
+      },
+      {
+        "title": "Garmoth preview visual refinements",
+        "description": "The Garmoth upload window is tighter and its loot editor uses consistent dark rows and cells so quantities, prices and totals remain easy to read."
+      },
+      {
+        "title": "Windows-only platform cleanup",
+        "description": "The Windows-only main window is explicitly marked for the Windows platform so tray-icon and other intentional Windows API usage no longer produces unnecessary cross-platform analyzer warnings."
+      }
+    ]
   }
 }

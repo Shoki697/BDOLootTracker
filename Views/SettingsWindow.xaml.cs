@@ -217,7 +217,7 @@ public partial class SettingsWindow : Window
             return;
 
         e.Cancel = true;
-        MessageBox.Show(
+        AppDialog.Show(
             "Please wait for the database update to finish.",
             "Database update",
             MessageBoxButton.OK,
@@ -523,7 +523,7 @@ public partial class SettingsWindow : Window
             ParserDiagnosticsResult result = await _parserProfileService.AutoRepairAsync();
             ApplyParserDiagnosticsResult(result, "Auto Repair");
 
-            MessageBox.Show(
+            AppDialog.Show(
                 result.Message + "\n\nThe active parser file is used the next time packet capture starts.",
                 "Loot Parser Auto Repair",
                 MessageBoxButton.OK,
@@ -629,7 +629,7 @@ public partial class SettingsWindow : Window
         string databasePath = DatabasePathBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(databasePath))
         {
-            MessageBox.Show("The database path cannot be empty.", "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppDialog.Show("The database path cannot be empty.", "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
 
@@ -667,7 +667,7 @@ public partial class SettingsWindow : Window
             FetchStatusText.Text = $"Database update error: {ex.Message}";
             RefreshDatabaseStatus();
 
-            MessageBox.Show(
+            AppDialog.Show(
                 ex.Message,
                 "Database update error",
                 MessageBoxButton.OK,
@@ -735,14 +735,14 @@ public partial class SettingsWindow : Window
 
         if (AdapterCombo.SelectedItem is not NetworkAdapterOption adapter)
         {
-            MessageBox.Show("Select a network adapter.", "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppDialog.Show("Select a network adapter.", "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         string databasePath = DatabasePathBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(databasePath))
         {
-            MessageBox.Show("The database path cannot be empty.", "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppDialog.Show("The database path cannot be empty.", "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -759,7 +759,7 @@ public partial class SettingsWindow : Window
 
         if (updateRecommended)
         {
-            var result = MessageBox.Show(
+            var result = AppDialog.Show(
                 "The database is incomplete for the selected Loot / Price Server / language, or the loot/price data is older than 7 days.\n\nUpdate now?",
                 "Database update recommended",
                 MessageBoxButton.YesNoCancel,
@@ -784,7 +784,7 @@ public partial class SettingsWindow : Window
         if (!string.Equals(startStopHotkey, "None", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(startStopHotkey, overlayHotkey, StringComparison.OrdinalIgnoreCase))
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 "Start / Stop Tracking and Toggle Overlay must use different shortcuts.",
                 "Keybinds",
                 MessageBoxButton.OK,
@@ -849,7 +849,7 @@ public partial class SettingsWindow : Window
     {
         if (IgnoreListBox.SelectedItem is not IgnoredItemRecord item)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 "Select an item from the Ignore List.",
                 "Ignore List",
                 MessageBoxButton.OK,
@@ -857,7 +857,7 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        var result = MessageBox.Show(
+        var result = AppDialog.Show(
             $"Remove \"{item.Name}\" (ID: {item.ItemId}) from the Ignore list?",
             "Ignore List",
             MessageBoxButton.YesNo,
@@ -874,7 +874,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Ignore List", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Show(ex.Message, "Ignore List", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

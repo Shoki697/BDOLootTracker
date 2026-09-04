@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Windows.Interop;
 using System.Windows;
 using System.Windows.Input;
@@ -17,6 +18,7 @@ using Forms = System.Windows.Forms;
 
 namespace BDOLootTracker;
 
+[SupportedOSPlatform("windows")]
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     // Keep the executable/taskbar/shortcut icon, but hide the tiny icon from
@@ -84,6 +86,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isGarmothUploading;
     private bool _isCheckingForUpdate;
     private bool _isInstallingUpdate;
+    private bool _startupUpdatePromptShown;
     private AppUpdateService.AvailableUpdateInfo? _availableUpdate;
     private ParserProfile _activeParserProfile = new();
     private bool _parserProfileConfirmedThisSession;
@@ -322,7 +325,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(CheckDatabaseAtStartup));
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(async () =>
         {
-            await CheckForUpdateAvailabilityAsync();
+            await CheckForUpdateAvailabilityAsync(showStartupPopup: true);
             _updateCheckTimer.Start();
         }));
         UpdateGarmothUploadButtonState();
@@ -337,7 +340,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(ShowWhatsNewIfNeeded));
     }
 
-    private async Task CheckForUpdateAvailabilityAsync()
+    private async Task CheckForUpdateAvailabilityAsync(bool showStartupPopup = false)
     {
         if (_isCheckingForUpdate || _isInstallingUpdate)
             return;
@@ -350,9 +353,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (detectedUpdate == null)
             {
-                // Once an update has been found, keep its banner visible until the
-                // user installs it or the application restarts. A temporary GitHub
-                // failure on a later two-minute check should not make it disappear.
                 if (_availableUpdate == null)
                 {
                     UpdateBannerText = string.Empty;
@@ -363,8 +363,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             _availableUpdate = detectedUpdate;
-            UpdateBannerText = $"Update available • v{_availableUpdate.NewVersion}";
+            UpdateBannerText = $"Update available • v{_availableUpdate.NewVersion} • Click here";
             UpdateBannerVisibility = Visibility.Visible;
+
+            if (showStartupPopup && !_startupUpdatePromptShown)
+            {
+                // This is the one startup-only opportunity for an intrusive update
+                // prompt. If the user has already started tracking while the network
+                // check was in flight, keep only the bottom-right notification.
+                _startupUpdatePromptShown = true;
+                if (!_captureService.IsRunning)
+                {
+                    var window = new UpdateAvailableWindow(
+                        _availableUpdate.CurrentVersion,
+                        _availableUpdate.NewVersion,
+                        _availableUpdate.ReleaseNotes)
+                    {
+                        Owner = this
+                    };
+
+                    window.ShowDialog();
+                    if (window.UpdateRequested)
+                        await InstallAvailableUpdateAsync(askForConfirmation: false);
+                }
+            }
         }
         finally
         {
@@ -373,13 +395,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private async void UpdateNow_Click(object sender, RoutedEventArgs e)
+        => await InstallAvailableUpdateAsync(askForConfirmation: true);
+
+    private async Task InstallAvailableUpdateAsync(bool askForConfirmation)
     {
         if (_isInstallingUpdate)
             return;
 
         if (_isGarmothUploading)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 "Wait for the Garmoth upload to finish before updating the application.",
                 "BDO Loot Tracker Update",
                 MessageBoxButton.OK,
@@ -392,7 +417,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             await CheckForUpdateAvailabilityAsync();
             if (_availableUpdate == null)
             {
-                MessageBox.Show(
+                AppDialog.Show(
                     "No newer version is currently available.",
                     "BDO Loot Tracker Update",
                     MessageBoxButton.OK,
@@ -401,22 +426,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
         }
 
-        string notes = string.IsNullOrWhiteSpace(_availableUpdate.ReleaseNotes)
-            ? string.Empty
-            : $"\n\nRelease notes:\n{_availableUpdate.ReleaseNotes}";
+        if (askForConfirmation)
+        {
+            string notes = string.IsNullOrWhiteSpace(_availableUpdate.ReleaseNotes)
+                ? string.Empty
+                : $"\n\nRelease notes:\n{_availableUpdate.ReleaseNotes}";
 
-        MessageBoxResult result = MessageBox.Show(
-            $"Update BDO Loot Tracker now?\n\n" +
-            $"Installed: v{_availableUpdate.CurrentVersion}\n" +
-            $"Available: v{_availableUpdate.NewVersion}" +
-            notes +
-            "\n\nThe tracker will restart automatically after the update.",
-            "Update Available",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Information);
+            MessageBoxResult result = AppDialog.Show(
+                $"Update BDO Loot Tracker now?\n\n" +
+                $"Installed: v{_availableUpdate.CurrentVersion}\n" +
+                $"Available: v{_availableUpdate.NewVersion}" +
+                notes +
+                "\n\nThe tracker will restart automatically after the update.",
+                "Update Available",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
 
-        if (result != MessageBoxResult.Yes)
-            return;
+            if (result != MessageBoxResult.Yes)
+                return;
+        }
 
         if (_captureService.IsRunning)
             StopSession(saveSession: true);
@@ -427,9 +455,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         UpdateBannerText = "Downloading update...";
         StatusText = "Downloading update...";
 
-        // Two independent markers are written before Velopack takes over. The
-        // settings value keeps backwards compatibility, while the small file marker
-        // survives updater restarts and is only removed after What's New was shown.
         _updateChangelogMarkerService.WritePending(_availableUpdate.NewVersion);
 
         var latest = _settingsService.Load();
@@ -455,7 +480,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             UpdateGarmothUploadButtonState();
             StatusText = "Update failed";
 
-            MessageBox.Show(
+            AppDialog.Show(
                 ex.Message,
                 "Update Failed",
                 MessageBoxButton.OK,
@@ -498,7 +523,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                         : $"The {_settings.Region} loot/price data is approximately {days} day(s) old.\n\nAn update is recommended when the data is older than 7 days.\n\nOpen Settings now?";
             }
 
-            var result = MessageBox.Show(
+            var result = AppDialog.Show(
                 message,
                 "Database update recommended",
                 MessageBoxButton.YesNo,
@@ -531,7 +556,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (string.IsNullOrWhiteSpace(_settings.AdapterName))
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 "Select a network adapter in Settings first.",
                 "BDO Loot Tracker",
                 MessageBoxButton.OK,
@@ -555,7 +580,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (Exception ex)
         {
             StartButton.IsEnabled = true;
-            MessageBox.Show(ex.Message, "Parser profile error", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Show(ex.Message, "Parser profile error", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
@@ -619,7 +644,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Capture error", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Show(ex.Message, "Capture error", MessageBoxButton.OK, MessageBoxImage.Error);
             StopSession(saveSession: false);
         }
     }
@@ -880,7 +905,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ? $"Parser repaired • {_activeParserProfile.ProfileVersion}"
                 : result.Message;
 
-            MessageBox.Show(
+            AppDialog.Show(
                 result.Message,
                 result.Success ? "Parser Auto Repair" : "Parser Recovery",
                 MessageBoxButton.OK,
@@ -889,7 +914,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch (Exception ex)
         {
             StatusText = $"Parser recovery failed: {ex.Message}";
-            MessageBox.Show(ex.Message, "Parser Recovery", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Show(ex.Message, "Parser Recovery", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -916,7 +941,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        MainGarmothUploadButton.Content = "☁  UPLOAD LAST SESSION";
+        MainGarmothUploadButton.Content = "☁  REVIEW / UPLOAD SESSION";
 
         bool hasCompletedSession = false;
         if (!_captureService.IsRunning)
@@ -936,14 +961,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         MainGarmothUploadButton.IsEnabled = !_captureService.IsRunning && hasCompletedSession;
     }
 
-    private async void UploadLastSessionToGarmoth_Click(object sender, RoutedEventArgs e)
+    private void UploadLastSessionToGarmoth_Click(object sender, RoutedEventArgs e)
     {
         if (_isGarmothUploading)
             return;
 
         if (_captureService.IsRunning)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 "Stop the active session before uploading to Garmoth.",
                 "Upload to Garmoth",
                 MessageBoxButton.OK,
@@ -956,7 +981,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (string.IsNullOrWhiteSpace(_settings.GarmothApiKey))
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 "No Garmoth API token is saved. Open Settings → Garmoth, paste your API token, and press Save Changes.",
                 "Upload to Garmoth",
                 MessageBoxButton.OK,
@@ -964,18 +989,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        SessionSummary? session;
-        IReadOnlyList<SessionLootHistoryRow> uploadLoot;
-
         try
         {
-            session = _database
+            SessionSummary? session = _database
                 .GetSessions(_settings.ItemLanguage, hideIgnored: true, limit: 50)
                 .FirstOrDefault(x => x.IsCompleted);
 
             if (session == null)
             {
-                MessageBox.Show(
+                AppDialog.Show(
                     "There is no completed session to upload yet.",
                     "Upload to Garmoth",
                     MessageBoxButton.OK,
@@ -984,78 +1006,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return;
             }
 
-            uploadLoot = _database.GetSessionLoot(session.SessionId, _settings.ItemLanguage, hideIgnored: true);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(ex.Message, "Upload to Garmoth", MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
-        }
+            IReadOnlyList<SessionLootHistoryRow> uploadLoot =
+                _database.GetSessionLoot(session.SessionId, _settings.ItemLanguage, hideIgnored: true);
 
-        if (uploadLoot.Count == 0)
-        {
-            MessageBox.Show(
-                "The most recent completed session has no uploadable loot items.",
-                "Upload to Garmoth",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return;
-        }
+            if (uploadLoot.Count == 0)
+            {
+                AppDialog.Show(
+                    "The most recent completed session has no uploadable loot items.",
+                    "Upload to Garmoth",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
 
-        string classText = string.IsNullOrWhiteSpace(session.ClassName)
-            ? "—"
-            : string.IsNullOrWhiteSpace(session.Spec)
-                ? session.ClassName
-                : $"{session.ClassName} • {session.Spec}";
-
-        string spotText = string.IsNullOrWhiteSpace(session.SpotName) ? "—" : session.SpotName;
-
-        MessageBoxResult confirmation = MessageBox.Show(
-            $"Upload the most recent completed session to Garmoth?\n\n" +
-            $"Date: {session.DateText}\n" +
-            $"Spot: {spotText}\n" +
-            $"Class: {classText}\n" +
-            $"Duration: {session.DurationText}\n" +
-            $"Loot items: {uploadLoot.Count:N0}\n\n" +
-            "Uploading the same session more than once may create a duplicate entry on Garmoth.",
-            "Upload to Garmoth",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-
-        if (confirmation != MessageBoxResult.Yes)
-            return;
-
-        _isGarmothUploading = true;
-        UpdateGarmothUploadButtonState();
-        StatusText = "Uploading session to Garmoth...";
-
-        try
-        {
-            await _garmothUploadService.UploadSessionAsync(
+            var preview = new GarmothUploadPreviewWindow(
+                _database,
+                _garmothUploadService,
                 _settings.GarmothApiKey,
                 session,
-                uploadLoot,
-                CancellationToken.None);
+                uploadLoot)
+            {
+                Owner = this
+            };
 
-            StatusText = "Session uploaded to Garmoth successfully";
-            MessageBox.Show(
-                "Session uploaded to Garmoth successfully.",
-                "Upload to Garmoth",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            preview.ShowDialog();
+            if (preview.UploadedSuccessfully)
+                StatusText = "Session uploaded to Garmoth successfully";
         }
         catch (Exception ex)
         {
-            StatusText = "Garmoth upload failed";
-            MessageBox.Show(
-                ex.Message,
-                "Garmoth upload error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            AppDialog.Show(ex.Message, "Upload to Garmoth", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            _isGarmothUploading = false;
             UpdateGarmothUploadButtonState();
         }
     }
@@ -1084,7 +1067,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (_captureService.IsRunning)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 "Stop the active session before changing network or database settings.",
                 "BDO Loot Tracker",
                 MessageBoxButton.OK,
@@ -1524,7 +1507,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         StatusText = errors[0];
         if (showErrors)
         {
-            MessageBox.Show(
+            AppDialog.Show(
                 string.Join("\n", errors),
                 "Keybinds",
                 MessageBoxButton.OK,

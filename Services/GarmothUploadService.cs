@@ -68,10 +68,20 @@ public sealed class GarmothUploadService : IDisposable
         _ownsHttpClient = httpClient == null;
     }
 
-    public async Task UploadSessionAsync(
+    public sealed record UploadResult(bool DropRateRequested, bool DropRateAccepted);
+
+    public Task<UploadResult> UploadSessionAsync(
         string apiKey,
         SessionSummary session,
         IReadOnlyCollection<SessionLootHistoryRow> loot,
+        CancellationToken cancellationToken)
+        => UploadSessionAsync(apiKey, session, loot, dropRatePercent: null, cancellationToken: cancellationToken);
+
+    public async Task<UploadResult> UploadSessionAsync(
+        string apiKey,
+        SessionSummary session,
+        IReadOnlyCollection<SessionLootHistoryRow> loot,
+        int? dropRatePercent,
         CancellationToken cancellationToken)
     {
         apiKey = apiKey?.Trim() ?? string.Empty;
@@ -103,8 +113,6 @@ public sealed class GarmothUploadService : IDisposable
             if (item.ItemId == 0 || item.Quantity == 0)
                 continue;
 
-            // The packet tracker currently tracks the item main key only.
-            // Standard grind drops use sub-key 0, matching the reference uploader.
             string key = $"{item.ItemId}_0";
             if (drops.TryGetValue(key, out ulong existing))
                 drops[key] = existing + item.Quantity;
@@ -115,37 +123,62 @@ public sealed class GarmothUploadService : IDisposable
         if (drops.Count == 0)
             throw new InvalidOperationException("The selected session does not contain any uploadable loot items.");
 
-        var payload = new
+        var payload = new Dictionary<string, object?>
         {
-            class_id = classId,
-            spec,
-            grindspot_id = grindSpotId,
-            minutes,
-            hourly,
-            total = totalSilver,
-            global = false,
-            drops
+            ["class_id"] = classId,
+            ["spec"] = spec,
+            ["grindspot_id"] = grindSpotId,
+            ["minutes"] = minutes,
+            ["hourly"] = hourly,
+            ["total"] = totalSilver,
+            ["global"] = false,
+            ["drops"] = drops
         };
 
+        // Garmoth's external grind-tracker endpoint currently accepts the session
+        // without exposing a working Drop Rate field. Earlier builds tried a
+        // `drop_rate` property, but successful HTTP responses silently ignored it.
+        // Keep the user's value as local session metadata instead of claiming it
+        // was transferred remotely.
+        bool dropRateRequested = dropRatePercent is > 0;
+
+        UploadHttpResult result = await SendPayloadAsync(apiKey, payload, cancellationToken);
+        if (result.Success)
+            return new UploadResult(dropRateRequested, false);
+
+        ThrowUploadError(result.StatusCode, result.ReasonPhrase, result.Body);
+        throw new InvalidOperationException("Garmoth upload failed.");
+    }
+
+    private async Task<UploadHttpResult> SendPayloadAsync(
+        string apiKey,
+        IReadOnlyDictionary<string, object?> payload,
+        CancellationToken cancellationToken)
+    {
         string json = JsonSerializer.Serialize(payload);
         using var request = new HttpRequestMessage(HttpMethod.Post, UploadUrl);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.TryAddWithoutValidation("apiKey", apiKey);
-        request.Headers.TryAddWithoutValidation("User-Agent", "BDOLootTracker/0.9");
+        request.Headers.TryAddWithoutValidation("User-Agent", "BDOLootTracker/0.15.4");
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
         string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        return new UploadHttpResult(
+            response.IsSuccessStatusCode,
+            (int)response.StatusCode,
+            response.ReasonPhrase ?? string.Empty,
+            body);
+    }
 
-        if (response.IsSuccessStatusCode)
-            return;
-
+    private static void ThrowUploadError(int statusCode, string reasonPhrase, string? body)
+    {
         string detail = TrimForError(body);
-        string message = (int)response.StatusCode switch
+        string message = statusCode switch
         {
             401 or 403 => "Garmoth rejected the API token. Check the token in Settings and try again.",
             429 => "Garmoth rate-limited the upload. Wait a moment and try again.",
-            _ => $"Garmoth upload failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}."
+            _ => $"Garmoth upload failed: HTTP {statusCode} {reasonPhrase}."
         };
 
         if (!string.IsNullOrWhiteSpace(detail))
@@ -153,6 +186,8 @@ public sealed class GarmothUploadService : IDisposable
 
         throw new HttpRequestException(message);
     }
+
+    private sealed record UploadHttpResult(bool Success, int StatusCode, string ReasonPhrase, string Body);
 
     private int ResolveGrindSpotId(SessionSummary session)
     {
