@@ -9,6 +9,10 @@ BDO Loot Tracker uses **Npcap** to passively capture Black Desert Online network
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
 
 [Download the latest release](https://github.com/Shoki697/BDOLootTracker/releases)
+<<<<<<< HEAD
+=======
+
+>>>>>>> 9de90cd (Release 0.12.1 UI Garmoth Sassions change)
 ---
 
 ## Requirements
@@ -51,7 +55,10 @@ After that, press **Start** to begin tracking.
 Track your current grinding session with live loot, silver and trash statistics.  
 The current class and detected grind spot are shown at the top.
 
+<<<<<<< HEAD
 ![BDO Loot Tracker](images/main-window.png)
+=======
+>>>>>>> 9de90cd (Release 0.12.1 UI Garmoth Sassions change)
 ---
 
 ## In-Game Overlay
@@ -94,3 +101,5 @@ Add your Garmoth API token under **Settings → Garmoth**.
 Completed sessions can then be uploaded from the main window directly below **STOP**, or from the **Sessions** window.
 
 ---
+<<<<<<< HEAD
+=======
