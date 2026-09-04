@@ -9,9 +9,6 @@ BDO Loot Tracker uses **Npcap** to passively capture Black Desert Online network
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
 
 [Download the latest release](https://github.com/Shoki697/BDOLootTracker/releases)
-
-![BDO Loot Tracker](images/main-window.png)
-
 ---
 
 ## Requirements
@@ -54,6 +51,7 @@ After that, press **Start** to begin tracking.
 Track your current grinding session with live loot, silver and trash statistics.  
 The current class and detected grind spot are shown at the top.
 
+![BDO Loot Tracker](images/main-window.png)
 ---
 
 ## In-Game Overlay
