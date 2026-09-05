@@ -159,7 +159,7 @@ public sealed class GarmothUploadService : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Post, UploadUrl);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.TryAddWithoutValidation("apiKey", apiKey);
-        request.Headers.TryAddWithoutValidation("User-Agent", "BDOLootTracker/0.12.1");
+        request.Headers.TryAddWithoutValidation("User-Agent", "BDOLootTracker/0.12.3");
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
         using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);

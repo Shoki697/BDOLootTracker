@@ -11,6 +11,12 @@ public sealed class AppSettings
     public string DatabasePath { get; set; } = string.Empty;
     public string GarmothApiKey { get; set; } = string.Empty;
 
+    // Optional compatibility mode for ExitLag. When enabled, packet capture
+    // scans TCP streams for the configured BDO loot signature instead of
+    // assuming the original server port, then locks to one relay stream and
+    // suppresses duplicate mirrored relays.
+    public bool ExitLagMode { get; set; }
+
     // Optional live-loot filter. When enabled, only item IDs present in the
     // locally cached Garmoth grind-spot drop list are tracked.
     public bool OnlyTrackGarmothItems { get; set; } = true;

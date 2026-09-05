@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "latestProfileVersion": "EU-2026.09.03.1",
+  "latestProfileVersion": "EU-2026.09.05.2",
   "profileUrl": "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/eu-current.json",
-  "profileSha256": "35c5a70ec2917edc3ba3cde36cef92ad83ce562040c9f82ee3f5931aa5394ae6",
+  "profileSha256": "84575c179814202080b2a75fc96feccfa8475f8a33523d3095242a0c20c818f4",
   "sampleVersion": "",
   "sampleUrl": "",
   "sampleSha256": "",
-  "notes": "Loot packet profile updated for the 2026-09-03 BDO patch. For a larger protocol change, upload a new capture under parser/samples and update the sample fields."
+  "notes": "2026-09-05 v2 transfer profile: adds the BE 16 Storage variant plus one-shot transfer state suppression. ExitLag mirrored-transfer protection is handled by CaptureService so a relay that misses a marker cannot lock on a Storage/Maid/Market inventory-add event."
 }

@@ -507,7 +507,9 @@ public sealed class ParserProfileService : IDisposable
             profile.MaximumPacketLength < profile.MinimumLength ||
             profile.ItemIdOffset < 0 ||
             profile.QuantityOffset < 0 ||
-            profile.MinimumLength < 1)
+            profile.MinimumLength < 1 ||
+            profile.SuppressLookbackBytes < 0 || profile.SuppressLookbackBytes > 4096 ||
+            profile.SuppressStateTimeoutMilliseconds < 0 || profile.SuppressStateTimeoutMilliseconds > 10000)
             throw new InvalidDataException("Parser offsets/framing are invalid.");
 
         int required = Math.Max(

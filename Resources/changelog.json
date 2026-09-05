@@ -76,5 +76,55 @@
         "description": "The Windows-only main window is explicitly marked for the Windows platform so tray-icon and other intentional Windows API usage no longer produces unnecessary cross-platform analyzer warnings."
       }
     ]
+  },
+  "0.12.2": {
+    "title": "v0.12.2 Packet / Transfer / ExitLag Stability",
+    "changes": [
+      {
+        "title": "Storage and Maid transfer filtering",
+        "description": "Storage and Transaction Maid withdrawals are now suppressed with a short packet lookback window instead of requiring the transfer marker to sit immediately next to the loot candidate. The filter remains data-driven in the parser JSON."
+      },
+      {
+        "title": "Central Market transfer protection kept",
+        "description": "The existing Central Market withdrawal marker remains part of the parser profile, so Market, Storage and Maid inventory transfers share the same transfer-suppression path instead of being counted as grind loot."
+      },
+      {
+        "title": "ExitLag compatibility mode",
+        "description": "Settings → Network now includes an optional ExitLag mode. It scans dynamic TCP relay ports for the BDO loot signature instead of assuming source port 8889, locks one valid relay, ignores mirrored duplicate relays and can fail over if the selected relay stops receiving traffic."
+      },
+      {
+        "title": "Capture diagnostics",
+        "description": "Network Settings shows the last capture mode plus accepted loot and suppressed-transfer counts. ExitLag sessions also report the locked relay and how many duplicate relay streams were observed."
+      },
+      {
+        "title": "Updated parser profile",
+        "description": "The built-in and GitHub-ready EU parser profile was advanced to EU-2026.09.05.1 with a 96-byte transfer lookback and the tested Central Market, Storage and Maid markers."
+      }
+    ]
+  },
+  "0.12.3": {
+    "title": "v0.12.3 ExitLag / Transfer Hotfix",
+    "changes": [
+      {
+        "title": "ExitLag relay detection warning",
+        "description": "Enabling ExitLag mode now shows a themed warning explaining that relay discovery can take a short moment after START. Start tracking before grinding and wait for the ExitLag relay status; the first 1–2 loot events can be missed while the relay is still being identified."
+      },
+      {
+        "title": "State-based Storage / Maid suppression",
+        "description": "Transfer filtering no longer depends only on a short byte lookback. A detected Market, Storage or Maid marker now arms a one-shot suppression state for the next valid inventory-add candidate, with a short timeout so later real mob loot is not swallowed."
+      },
+      {
+        "title": "Additional Storage transfer variant",
+        "description": "The EU parser profile now recognizes the additional 28 00 00 BE 16 Storage transfer frame observed in the second ExitLag capture. This closes the variant that could previously be counted as loot."
+      },
+      {
+        "title": "ExitLag cross-relay transfer protection",
+        "description": "If one ExitLag relay identifies a transfer but a mirrored relay misses the marker because of different TCP segmentation, the matching mirrored inventory-add event is suppressed before it can lock the tracker onto the wrong relay or enter session loot."
+      },
+      {
+        "title": "Parser profile EU-2026.09.05.2",
+        "description": "Built-in and GitHub parser profiles were advanced to EU-2026.09.05.2 with the new Storage marker, 2-second one-shot transfer state and updated manifest hash."
+      }
+    ]
   }
 }

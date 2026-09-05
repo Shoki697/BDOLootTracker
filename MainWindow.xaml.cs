@@ -629,7 +629,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 className,
                 spec);
 
-            _captureService.Start(_settings.AdapterName);
+            _captureService.Start(_settings.AdapterName, _settings.ExitLagMode);
             _timer.Start();
             _autoSaveTimer.Start();
 
@@ -639,7 +639,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             string characterStatus = selectedClass == null
                 ? string.Empty
                 : $" • {className}{(string.IsNullOrWhiteSpace(spec) ? string.Empty : $" {spec}")}";
-            StatusText = $"Tracking active • {_settings.Region}{characterStatus}";
+            StatusText = _settings.ExitLagMode
+                ? $"Tracking active • {_settings.Region}{characterStatus} • ExitLag • detecting relay..."
+                : $"Tracking active • {_settings.Region}{characterStatus}";
             RefreshMetrics();
         }
         catch (Exception ex)
@@ -899,7 +901,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _captureService.ConfigureParser(_activeParserProfile);
             if (captureWasRunning && _sessionStartedUtc != null)
-                _captureService.Start(_settings.AdapterName);
+                _captureService.Start(_settings.AdapterName, _settings.ExitLagMode);
 
             StatusText = result.Success
                 ? $"Parser repaired • {_activeParserProfile.ProfileVersion}"
@@ -1081,7 +1083,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         try
         {
-            var window = new SettingsWindow(_settingsService)
+            var window = new SettingsWindow(_settingsService, _captureService)
             {
                 Owner = this
             };

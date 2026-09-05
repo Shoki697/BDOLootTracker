@@ -8,11 +8,24 @@ namespace BDOLootTracker.Services;
 
 public sealed class CaptureService : IDisposable
 {
-    private readonly Dictionary<ushort, BdoConnection> _connections = new();
+    private static readonly TimeSpan ExitLagRelayFailoverAfter = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan ExitLagSuppressedMirrorWindow = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan ConnectionIdleCleanupAfter = TimeSpan.FromMinutes(2);
+
+    private readonly object _sync = new();
+    private readonly Dictionary<FlowKey, BdoConnection> _connections = new();
+    private readonly HashSet<FlowKey> _duplicateRelayFlows = new();
+    private readonly List<SuppressedTransferFingerprint> _recentSuppressedTransfers = new();
+
     private ICaptureDevice? _device;
     private ParserProfile _parserProfile;
+    private FlowKey? _activeExitLagFlow;
+    private bool _exitLagMode;
+    private DateTime _nextConnectionCleanupUtc;
+
     private long _serverPayloadBytes;
     private long _validLootCount;
+    private long _suppressedTransferCount;
     private long _lastServerPacketTicks;
     private long _lastValidLootTicks;
 
@@ -25,11 +38,31 @@ public sealed class CaptureService : IDisposable
     }
 
     public bool IsRunning { get; private set; }
+    public bool ExitLagModeEnabled => _exitLagMode;
     public long ServerPayloadBytesReceived => Interlocked.Read(ref _serverPayloadBytes);
     public long ValidLootCount => Interlocked.Read(ref _validLootCount);
+    public long SuppressedTransferCount => Interlocked.Read(ref _suppressedTransferCount);
     public DateTime? LastServerPacketUtc => ToUtcDateTime(Interlocked.Read(ref _lastServerPacketTicks));
     public DateTime? LastValidLootUtc => ToUtcDateTime(Interlocked.Read(ref _lastValidLootTicks));
     public string ActiveProfileVersion => _parserProfile.ProfileVersion;
+
+    public string ActiveExitLagRelay
+    {
+        get
+        {
+            lock (_sync)
+                return _activeExitLagFlow?.ToDisplayString() ?? string.Empty;
+        }
+    }
+
+    public int DuplicateExitLagRelayCount
+    {
+        get
+        {
+            lock (_sync)
+                return _duplicateRelayFlows.Count;
+        }
+    }
 
     public event Action<uint, ulong>? LootReceived;
     public event Action<string>? StatusChanged;
@@ -44,7 +77,7 @@ public sealed class CaptureService : IDisposable
         _parserProfile = profile;
     }
 
-    public void Start(string adapterName)
+    public void Start(string adapterName, bool exitLagMode = false)
     {
         if (IsRunning)
             return;
@@ -55,20 +88,40 @@ public sealed class CaptureService : IDisposable
         if (device == null)
             throw new InvalidOperationException("The selected network adapter could not be found.");
 
-        _connections.Clear();
+        lock (_sync)
+        {
+            _connections.Clear();
+            _duplicateRelayFlows.Clear();
+            _recentSuppressedTransfers.Clear();
+            _activeExitLagFlow = null;
+            _exitLagMode = exitLagMode;
+            _nextConnectionCleanupUtc = DateTime.UtcNow.AddSeconds(30);
+        }
+
         Interlocked.Exchange(ref _serverPayloadBytes, 0);
         Interlocked.Exchange(ref _validLootCount, 0);
+        Interlocked.Exchange(ref _suppressedTransferCount, 0);
         Interlocked.Exchange(ref _lastServerPacketTicks, 0);
         Interlocked.Exchange(ref _lastValidLootTicks, 0);
 
         _device = device;
         _device.OnPacketArrival += OnPacketArrival;
         _device.Open(DeviceModes.Promiscuous, read_timeout: 1000);
-        _device.Filter = $"tcp src port {_parserProfile.ServerPort}";
+
+        // Normal BDO connections still use the known server port and retain the
+        // narrow BPF filter. ExitLag replaces that server endpoint with dynamic
+        // relay ports, so compatibility mode scans TCP payloads and lets the BDO
+        // parser identify/lock one valid relay stream at runtime.
+        _device.Filter = exitLagMode
+            ? "tcp"
+            : $"tcp src port {_parserProfile.ServerPort}";
+
         _device.StartCapture();
 
         IsRunning = true;
-        StatusChanged?.Invoke($"Connected • parser {_parserProfile.ProfileVersion}");
+        StatusChanged?.Invoke(exitLagMode
+            ? $"Connected • ExitLag scan • parser {_parserProfile.ProfileVersion}"
+            : $"Connected • parser {_parserProfile.ProfileVersion}");
     }
 
     public void Stop()
@@ -89,7 +142,13 @@ public sealed class CaptureService : IDisposable
                 _device = null;
             }
 
-            _connections.Clear();
+            lock (_sync)
+            {
+                // Keep the last relay/duplicate diagnostics available after STOP.
+                // START resets them before the next capture begins.
+                _connections.Clear();
+            }
+
             IsRunning = false;
             StatusChanged?.Invoke("Stopped");
         }
@@ -103,23 +162,49 @@ public sealed class CaptureService : IDisposable
             var packet = Packet.ParsePacket(rawPacket.LinkLayerType, rawPacket.Data);
             var tcp = packet.Extract<TcpPacket>();
 
-            if (tcp == null || tcp.SourcePort != _parserProfile.ServerPort)
+            if (tcp == null)
                 return;
 
-            var payload = tcp.PayloadData;
+            if (!_exitLagMode && tcp.SourcePort != _parserProfile.ServerPort)
+                return;
+
+            byte[]? payload = tcp.PayloadData;
             if (payload == null || payload.Length == 0)
                 return;
 
-            Interlocked.Add(ref _serverPayloadBytes, payload.Length);
-            Interlocked.Exchange(ref _lastServerPacketTicks, DateTime.UtcNow.Ticks);
+            var flow = new FlowKey(tcp.SourcePort, tcp.DestinationPort);
+            DateTime now = DateTime.UtcNow;
+            BdoConnection connection;
 
-            ushort streamId = tcp.DestinationPort;
-
-            if (!_connections.TryGetValue(streamId, out var connection))
+            lock (_sync)
             {
-                connection = new BdoConnection(_parserProfile);
-                connection.Parser.LootReceived += Parser_LootReceived;
-                _connections[streamId] = connection;
+                CleanupIdleConnectionsIfNeeded(now);
+
+                if (!_connections.TryGetValue(flow, out BdoConnection? existing))
+                {
+                    connection = new BdoConnection(_parserProfile, flow);
+                    connection.Parser.LootReceived += (itemId, quantity) =>
+                        Parser_LootReceived(connection, itemId, quantity);
+                    connection.Parser.TransferSuppressed += (itemId, quantity) =>
+                        Parser_TransferSuppressed(connection, itemId, quantity);
+                    _connections[flow] = connection;
+                }
+                else
+                {
+                    connection = existing;
+                }
+
+                connection.LastPayloadUtc = now;
+            }
+
+            // In normal mode all captured payload belongs to the configured BDO
+            // server port. In ExitLag mode only count the selected relay after a
+            // valid loot packet has identified it, so unrelated TCP traffic does
+            // not trigger the parser-health warning.
+            if (!_exitLagMode || IsActiveExitLagFlow(flow))
+            {
+                Interlocked.Add(ref _serverPayloadBytes, payload.Length);
+                Interlocked.Exchange(ref _lastServerPacketTicks, now.Ticks);
             }
 
             connection.Reassembler.Push(
@@ -133,11 +218,162 @@ public sealed class CaptureService : IDisposable
         }
     }
 
-    private void Parser_LootReceived(uint itemId, ulong quantity)
+    private void Parser_LootReceived(BdoConnection connection, uint itemId, ulong quantity)
+    {
+        if (!_exitLagMode)
+        {
+            EmitLoot(itemId, quantity);
+            return;
+        }
+
+        bool emit;
+        bool relayChanged = false;
+        string relayLabel = string.Empty;
+
+        lock (_sync)
+        {
+            DateTime now = DateTime.UtcNow;
+            CleanupRecentSuppressedTransfers(now);
+
+            // ExitLag can deliver mirrored copies of the same BDO stream with
+            // slightly different TCP segmentation. If one relay recognized a
+            // Storage/Maid/Market transfer marker but another mirror missed that
+            // marker, do not let the mirrored inventory-add candidate become the
+            // first "valid loot" event and accidentally lock the wrong relay.
+            if (WasRecentlySuppressedOnAnotherRelay(connection.Flow, itemId, quantity, now))
+            {
+                _duplicateRelayFlows.Add(connection.Flow);
+                return;
+            }
+
+            if (_activeExitLagFlow == null)
+            {
+                _activeExitLagFlow = connection.Flow;
+                relayChanged = true;
+                emit = true;
+            }
+            else if (_activeExitLagFlow.Value.Equals(connection.Flow))
+            {
+                emit = true;
+            }
+            else
+            {
+                bool activeStale = !_connections.TryGetValue(_activeExitLagFlow.Value, out BdoConnection? active) ||
+                                   now - active.LastPayloadUtc >= ExitLagRelayFailoverAfter;
+
+                if (activeStale)
+                {
+                    _duplicateRelayFlows.Add(_activeExitLagFlow.Value);
+                    _activeExitLagFlow = connection.Flow;
+                    relayChanged = true;
+                    emit = true;
+                }
+                else
+                {
+                    // ExitLag can mirror the same BDO server stream through more
+                    // than one relay. Once one valid relay is locked, loot events
+                    // from the other live mirrors are deliberately ignored.
+                    _duplicateRelayFlows.Add(connection.Flow);
+                    emit = false;
+                }
+            }
+
+            if (relayChanged)
+                relayLabel = _activeExitLagFlow.Value.ToDisplayString();
+        }
+
+        if (!emit)
+            return;
+
+        if (relayChanged)
+        {
+            StatusChanged?.Invoke(
+                $"Connected • ExitLag relay {relayLabel} • parser {_parserProfile.ProfileVersion}");
+        }
+
+        EmitLoot(itemId, quantity);
+    }
+
+    private void Parser_TransferSuppressed(BdoConnection connection, uint itemId, ulong quantity)
+    {
+        if (!_exitLagMode)
+        {
+            Interlocked.Increment(ref _suppressedTransferCount);
+            return;
+        }
+
+        lock (_sync)
+        {
+            DateTime now = DateTime.UtcNow;
+            CleanupRecentSuppressedTransfers(now);
+
+            bool alreadySeen = _recentSuppressedTransfers.Any(x =>
+                x.ItemId == itemId &&
+                x.Quantity == quantity &&
+                now - x.SeenUtc <= ExitLagSuppressedMirrorWindow);
+
+            _recentSuppressedTransfers.Add(
+                new SuppressedTransferFingerprint(itemId, quantity, connection.Flow, now));
+
+            // Both ExitLag mirrors normally see the same transfer. Count the
+            // logical transfer only once, even before an active relay is locked.
+            if (!alreadySeen)
+                Interlocked.Increment(ref _suppressedTransferCount);
+        }
+    }
+
+    private bool WasRecentlySuppressedOnAnotherRelay(
+        FlowKey flow,
+        uint itemId,
+        ulong quantity,
+        DateTime now)
+    {
+        return _recentSuppressedTransfers.Any(x =>
+            !x.Flow.Equals(flow) &&
+            x.ItemId == itemId &&
+            x.Quantity == quantity &&
+            now - x.SeenUtc <= ExitLagSuppressedMirrorWindow);
+    }
+
+    private void CleanupRecentSuppressedTransfers(DateTime now)
+    {
+        _recentSuppressedTransfers.RemoveAll(x => now - x.SeenUtc > ExitLagSuppressedMirrorWindow);
+    }
+
+    private void EmitLoot(uint itemId, ulong quantity)
     {
         Interlocked.Increment(ref _validLootCount);
         Interlocked.Exchange(ref _lastValidLootTicks, DateTime.UtcNow.Ticks);
         LootReceived?.Invoke(itemId, quantity);
+    }
+
+    private bool IsActiveExitLagFlow(FlowKey flow)
+    {
+        lock (_sync)
+            return _activeExitLagFlow != null && _activeExitLagFlow.Value.Equals(flow);
+    }
+
+    private void CleanupIdleConnectionsIfNeeded(DateTime now)
+    {
+        if (now < _nextConnectionCleanupUtc)
+            return;
+
+        _nextConnectionCleanupUtc = now.AddSeconds(30);
+        CleanupRecentSuppressedTransfers(now);
+        FlowKey? active = _activeExitLagFlow;
+
+        FlowKey[] stale = _connections
+            .Where(pair =>
+                (!active.HasValue || !pair.Key.Equals(active.Value)) &&
+                now - pair.Value.LastPayloadUtc >= ConnectionIdleCleanupAfter)
+            .Select(pair => pair.Key)
+            .ToArray();
+
+        foreach (FlowKey key in stale)
+        {
+            _connections.Remove(key);
+            _duplicateRelayFlows.Remove(key);
+        }
     }
 
     public void Dispose() => Stop();
@@ -145,13 +381,27 @@ public sealed class CaptureService : IDisposable
     private static DateTime? ToUtcDateTime(long ticks)
         => ticks <= 0 ? null : new DateTime(ticks, DateTimeKind.Utc);
 
+    private readonly record struct FlowKey(ushort SourcePort, ushort DestinationPort)
+    {
+        public string ToDisplayString() => $"{SourcePort} → {DestinationPort}";
+    }
+
+    private readonly record struct SuppressedTransferFingerprint(
+        uint ItemId,
+        ulong Quantity,
+        FlowKey Flow,
+        DateTime SeenUtc);
+
     private sealed class BdoConnection
     {
-        public BdoConnection(ParserProfile profile)
+        public BdoConnection(ParserProfile profile, FlowKey flow)
         {
+            Flow = flow;
             Parser = new BdoLootParser(profile);
         }
 
+        public FlowKey Flow { get; }
+        public DateTime LastPayloadUtc { get; set; } = DateTime.UtcNow;
         public TcpStreamReassembler Reassembler { get; } = new();
         public BdoLootParser Parser { get; }
     }
@@ -253,20 +503,26 @@ public sealed class CaptureService : IDisposable
     {
         private readonly ParserProfile _profile;
         private readonly byte[] _signature;
-        private readonly List<byte[]> _suppressPrefixes;
+        private readonly List<byte[]> _suppressMarkers;
         private readonly List<byte> _buffer = new();
+
+        private long _bufferBaseOffset;
+        private long _lastObservedSuppressMarkerEndOffset = -1;
+        private bool _pendingTransferSuppression;
+        private DateTime _pendingTransferExpiresUtc;
 
         public BdoLootParser(ParserProfile profile)
         {
             _profile = profile;
             _signature = ParserProfileService.ParseHex(profile.Signature);
-            _suppressPrefixes = (profile.SuppressIfPrecededBy ?? new List<string>())
+            _suppressMarkers = (profile.SuppressIfPrecededBy ?? new List<string>())
                 .Select(ParserProfileService.ParseHex)
                 .Where(x => x.Length > 0)
                 .ToList();
         }
 
         public event Action<uint, ulong>? LootReceived;
+        public event Action<uint, ulong>? TransferSuppressed;
 
         public void Push(byte[] data)
         {
@@ -284,6 +540,11 @@ public sealed class CaptureService : IDisposable
                 int signaturePosition = FindSignature();
                 if (signaturePosition < 0)
                 {
+                    // A transfer marker can arrive in its own application packet
+                    // well before the inventory-add candidate. Observe it before
+                    // the rolling buffer is trimmed so the one-shot transfer state
+                    // survives TCP segmentation and intermediate packets.
+                    ObserveSuppressMarkersBefore(_buffer.Count);
                     TrimWhenNoSignature();
                     return;
                 }
@@ -293,14 +554,16 @@ public sealed class CaptureService : IDisposable
                 {
                     // Capture started in the middle of an application packet.
                     // Skip this incomplete signature and resynchronize on the next one.
-                    _buffer.RemoveRange(0, signaturePosition + 1);
+                    RemovePrefix(signaturePosition + 1);
                     continue;
                 }
 
-                bool suppress = IsSuppressed(candidateStart);
+                ObserveSuppressMarkersBefore(candidateStart);
+                bool stateSuppress = HasPendingTransferSuppression();
+                bool suppress = stateSuppress || IsSuppressedByLookback(candidateStart);
 
                 if (candidateStart > 0)
-                    _buffer.RemoveRange(0, candidateStart);
+                    RemovePrefix(candidateStart);
 
                 if (_buffer.Count < _profile.MinimumLength)
                     return;
@@ -309,7 +572,7 @@ public sealed class CaptureService : IDisposable
                 if (packetLength < _profile.MinimumLength || packetLength > _profile.MaximumPacketLength)
                 {
                     // False-positive signature. Advance one byte and rescan.
-                    _buffer.RemoveAt(0);
+                    RemovePrefix(1);
                     continue;
                 }
 
@@ -321,14 +584,30 @@ public sealed class CaptureService : IDisposable
                 ulong quantity = BinaryPrimitives.ReadUInt64LittleEndian(
                     CollectionsMarshal.AsSpan(_buffer).Slice(_profile.QuantityOffset, 8));
 
-                if (!suppress &&
+                bool reasonable =
                     itemId > 0 && itemId <= _profile.MaxReasonableItemId &&
-                    quantity > 0 && quantity <= _profile.MaxReasonableQuantity)
+                    quantity > 0 && quantity <= _profile.MaxReasonableQuantity;
+
+                if (reasonable)
                 {
-                    LootReceived?.Invoke(itemId, quantity);
+                    if (suppress)
+                    {
+                        TransferSuppressed?.Invoke(itemId, quantity);
+
+                        // State suppression is intentionally one-shot. A single
+                        // Storage/Maid/Market transfer marker suppresses the next
+                        // reasonable inventory-add candidate only, preventing a
+                        // stale transfer state from swallowing later real mob loot.
+                        if (stateSuppress)
+                            ClearPendingTransferSuppression();
+                    }
+                    else
+                    {
+                        LootReceived?.Invoke(itemId, quantity);
+                    }
                 }
 
-                _buffer.RemoveRange(0, packetLength);
+                RemovePrefix(packetLength);
             }
         }
 
@@ -371,40 +650,132 @@ public sealed class CaptureService : IDisposable
             return length;
         }
 
-        private bool IsSuppressed(int candidateStart)
+        private void ObserveSuppressMarkersBefore(int limitExclusive)
         {
-            foreach (byte[] prefix in _suppressPrefixes)
+            if (_profile.SuppressStateTimeoutMilliseconds <= 0 || _suppressMarkers.Count == 0)
+                return;
+
+            int limit = Math.Clamp(limitExclusive, 0, _buffer.Count);
+            long newestObservedEnd = _lastObservedSuppressMarkerEndOffset;
+            bool sawNewMarker = false;
+
+            foreach (byte[] marker in _suppressMarkers)
             {
-                if (candidateStart < prefix.Length)
+                if (marker.Length == 0 || limit < marker.Length)
                     continue;
 
-                int start = candidateStart - prefix.Length;
-                bool match = true;
-                for (int i = 0; i < prefix.Length; i++)
+                int lastStart = limit - marker.Length;
+                for (int start = 0; start <= lastStart; start++)
                 {
-                    if (_buffer[start + i] == prefix[i])
+                    if (!MatchesAt(start, marker))
                         continue;
 
-                    match = false;
-                    break;
+                    long absoluteEnd = _bufferBaseOffset + start + marker.Length;
+                    if (absoluteEnd <= _lastObservedSuppressMarkerEndOffset)
+                        continue;
+
+                    newestObservedEnd = Math.Max(newestObservedEnd, absoluteEnd);
+                    sawNewMarker = true;
+                }
+            }
+
+            if (!sawNewMarker)
+                return;
+
+            _lastObservedSuppressMarkerEndOffset = newestObservedEnd;
+            _pendingTransferSuppression = true;
+            _pendingTransferExpiresUtc = DateTime.UtcNow.AddMilliseconds(
+                _profile.SuppressStateTimeoutMilliseconds);
+        }
+
+        private bool HasPendingTransferSuppression()
+        {
+            if (!_pendingTransferSuppression)
+                return false;
+
+            if (DateTime.UtcNow <= _pendingTransferExpiresUtc)
+                return true;
+
+            ClearPendingTransferSuppression();
+            return false;
+        }
+
+        private void ClearPendingTransferSuppression()
+        {
+            _pendingTransferSuppression = false;
+            _pendingTransferExpiresUtc = default;
+        }
+
+        private bool IsSuppressedByLookback(int candidateStart)
+        {
+            if (_suppressMarkers.Count == 0)
+                return false;
+
+            int configuredLookback = Math.Max(0, _profile.SuppressLookbackBytes);
+
+            foreach (byte[] marker in _suppressMarkers)
+            {
+                if (candidateStart < marker.Length)
+                    continue;
+
+                if (configuredLookback <= 0)
+                {
+                    if (MatchesAt(candidateStart - marker.Length, marker))
+                        return true;
+                    continue;
                 }
 
-                if (match)
-                    return true;
+                int first = Math.Max(0, candidateStart - configuredLookback);
+                int last = candidateStart - marker.Length;
+
+                // Legacy/fallback search. The state-based path above is what
+                // makes v0.12.3 resilient when intermediate packets or ExitLag
+                // relay segmentation move the marker outside the short lookback.
+                for (int start = last; start >= first; start--)
+                {
+                    if (MatchesAt(start, marker))
+                        return true;
+                }
             }
 
             return false;
         }
 
+        private bool MatchesAt(int start, byte[] pattern)
+        {
+            if (start < 0 || start + pattern.Length > _buffer.Count)
+                return false;
+
+            for (int i = 0; i < pattern.Length; i++)
+            {
+                if (_buffer[start + i] != pattern[i])
+                    return false;
+            }
+
+            return true;
+        }
+
         private void TrimWhenNoSignature()
         {
-            int maxPrefix = _suppressPrefixes.Count == 0 ? 0 : _suppressPrefixes.Max(x => x.Length);
+            int maxMarker = _suppressMarkers.Count == 0 ? 0 : _suppressMarkers.Max(x => x.Length);
+            int lookback = Math.Max(0, _profile.SuppressLookbackBytes);
             int keep = Math.Max(
-                _profile.SignatureOffset + _signature.Length - 1 + maxPrefix,
+                _profile.SignatureOffset + _signature.Length - 1 + lookback + maxMarker,
                 _profile.MinimumLength - 1);
 
             if (_buffer.Count > keep)
-                _buffer.RemoveRange(0, _buffer.Count - keep);
+                RemovePrefix(_buffer.Count - keep);
+        }
+
+        private void RemovePrefix(int count)
+        {
+            if (count <= 0)
+                return;
+
+            count = Math.Min(count, _buffer.Count);
+            _buffer.RemoveRange(0, count);
+            _bufferBaseOffset += count;
         }
     }
+
 }

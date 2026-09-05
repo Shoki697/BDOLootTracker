@@ -15,20 +15,23 @@ public partial class SettingsWindow : Window
     private static readonly TimeSpan MarketMaxAge = TimeSpan.FromDays(7);
 
     private readonly SettingsService _settingsService;
+    private readonly CaptureService? _captureService;
     private readonly DatabaseFetchService _fetchService = new();
     private readonly ParserProfileService _parserProfileService = new();
     private AppSettings _settings;
     private ClassIconService? _classIconService;
     private bool _isLoading = true;
     private bool _isFetching;
+    private bool _exitLagWarningShownThisWindow;
 
     public event EventHandler? MoveOverlayRequested;
     public event EventHandler? OverlayResetRequested;
 
-    public SettingsWindow(SettingsService settingsService)
+    public SettingsWindow(SettingsService settingsService, CaptureService? captureService = null)
     {
         InitializeComponent();
         _settingsService = settingsService;
+        _captureService = captureService;
         _settings = _settingsService.Load();
 
         LoadAdapters();
@@ -40,6 +43,7 @@ public partial class SettingsWindow : Window
         RefreshIgnoreList();
         RefreshNpcapStatus();
         RefreshParserStatusLocal();
+        RefreshCaptureDiagnostics();
         ShowTab(NetworkTabButton, NetworkSection);
         UpdateSaveButtonState();
 
@@ -110,6 +114,8 @@ public partial class SettingsWindow : Window
     private void HookChangeTracking()
     {
         AdapterCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
+        ExitLagModeCheckBox.Checked += ExitLagModeCheckBox_Checked;
+        ExitLagModeCheckBox.Unchecked += (_, _) => UpdateSaveButtonState();
         RegionCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
         LanguageCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
         DatabasePathBox.TextChanged += (_, _) => UpdateSaveButtonState();
@@ -126,6 +132,23 @@ public partial class SettingsWindow : Window
         OverlaySortOrderCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
         StartStopHotkeyBox.TextChanged += (_, _) => UpdateSaveButtonState();
         OverlayHotkeyBox.TextChanged += (_, _) => UpdateSaveButtonState();
+    }
+
+
+    private void ExitLagModeCheckBox_Checked(object sender, RoutedEventArgs e)
+    {
+        UpdateSaveButtonState();
+
+        if (_isLoading || _exitLagWarningShownThisWindow)
+            return;
+
+        _exitLagWarningShownThisWindow = true;
+        AppDialog.Show(
+            "ExitLag uses dynamic relay ports, so the tracker needs a short moment after START to identify and lock the active BDO relay.\n\n" +
+            "Start tracking before you begin grinding and wait until the Network status changes from 'ExitLag scan' to an 'ExitLag relay' connection. The first 1–2 loot events may be missed while relay detection is still in progress.",
+            "ExitLag compatibility",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
     }
 
     private void UpdateSaveButtonState()
@@ -145,6 +168,9 @@ public partial class SettingsWindow : Window
     {
         string selectedAdapter = (AdapterCombo.SelectedItem as NetworkAdapterOption)?.Name ?? string.Empty;
         if (!string.Equals(selectedAdapter, _settings.AdapterName ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if ((ExitLagModeCheckBox.IsChecked == true) != _settings.ExitLagMode)
             return true;
 
         if (!string.Equals(GetSelectedRegion(), DatabaseService.NormalizeRegion(_settings.Region), StringComparison.OrdinalIgnoreCase))
@@ -257,6 +283,7 @@ public partial class SettingsWindow : Window
         DatabasePathBox.Text = _settings.DatabasePath;
         CharacterBox.Text = _settings.CharacterName;
         GarmothApiKeyBox.Password = _settings.GarmothApiKey ?? string.Empty;
+        ExitLagModeCheckBox.IsChecked = _settings.ExitLagMode;
         GarmothOnlyLootCheckBox.IsChecked = _settings.OnlyTrackGarmothItems;
 
         OverlayModeCombo.ItemsSource = new[] { "Detailed", "Compact" };
@@ -392,6 +419,7 @@ public partial class SettingsWindow : Window
     {
         LoadAdapters();
         RefreshNpcapStatus();
+        RefreshCaptureDiagnostics();
     }
 
     private void RecheckNpcap_Click(object sender, RoutedEventArgs e)
@@ -444,6 +472,40 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void RefreshCaptureDiagnostics()
+    {
+        if (_captureService == null)
+        {
+            CaptureDiagnosticsText.Text = "Capture diagnostics become available after a session has been started.";
+            return;
+        }
+
+        long accepted = _captureService.ValidLootCount;
+        long suppressed = _captureService.SuppressedTransferCount;
+        string mode = _captureService.ExitLagModeEnabled ? "ExitLag" : "Standard";
+
+        if (accepted == 0 && suppressed == 0 && _captureService.ServerPayloadBytesReceived == 0)
+        {
+            CaptureDiagnosticsText.Text = $"Last capture mode: {mode} • no packet activity recorded yet.";
+            return;
+        }
+
+        if (_captureService.ExitLagModeEnabled)
+        {
+            string relay = string.IsNullOrWhiteSpace(_captureService.ActiveExitLagRelay)
+                ? "not locked"
+                : _captureService.ActiveExitLagRelay;
+            CaptureDiagnosticsText.Text =
+                $"Last capture: ExitLag • relay {relay} • duplicate relay(s) {_captureService.DuplicateExitLagRelayCount:N0} • " +
+                $"accepted loot {accepted:N0} • suppressed transfer(s) {suppressed:N0}.";
+        }
+        else
+        {
+            CaptureDiagnosticsText.Text =
+                $"Last capture: Standard • accepted loot {accepted:N0} • suppressed transfer(s) {suppressed:N0}.";
+        }
+    }
+
     private void RefreshParserStatusLocal()
     {
         try
@@ -460,7 +522,8 @@ public partial class SettingsWindow : Window
             ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94));
             ParserDetailsText.Text =
                 $"Profile source: {source} • {lastGoodText} • Server port: {profile.ServerPort} • " +
-                $"Signature: {profile.Signature} • Item offset: {profile.ItemIdOffset} • Quantity offset: {profile.QuantityOffset}. " +
+                $"Signature: {profile.Signature} • Item offset: {profile.ItemIdOffset} • Quantity offset: {profile.QuantityOffset} • " +
+                $"Transfer lookback: {profile.SuppressLookbackBytes} B • Suppress markers: {profile.SuppressIfPrecededBy?.Count ?? 0}. " +
                 (string.IsNullOrWhiteSpace(sampleVersion)
                     ? "No cached packet sample. Remote status has not been checked."
                     : $"Cached packet sample: {sampleVersion}. Remote status has not been checked.");
@@ -798,6 +861,7 @@ public partial class SettingsWindow : Window
         // with the stale coordinates it had when the dialog was first opened.
         var settingsToSave = _settingsService.Load();
         settingsToSave.AdapterName = adapter.Name;
+        settingsToSave.ExitLagMode = ExitLagModeCheckBox.IsChecked == true;
         settingsToSave.Region = region;
         settingsToSave.ItemLanguage = language;
         settingsToSave.CharacterClassType = classSelected ? selectedClass!.ClassType : null;
@@ -882,6 +946,7 @@ public partial class SettingsWindow : Window
     {
         AdapterCombo.IsEnabled = enabled;
         RefreshAdaptersButton.IsEnabled = enabled;
+        ExitLagModeCheckBox.IsEnabled = enabled;
         RecheckNpcapButton.IsEnabled = enabled;
         ParserDiagnosticsButton.IsEnabled = enabled;
         ParserCheckUpdateButton.IsEnabled = enabled;

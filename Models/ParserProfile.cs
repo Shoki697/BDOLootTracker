@@ -26,8 +26,13 @@ public sealed class ParserProfile
     public uint MaxReasonableItemId { get; set; } = 10_000_000;
     public ulong MaxReasonableQuantity { get; set; } = 10_000_000_000UL;
 
-    // Optional byte sequences that, when found immediately before the
-    // candidate packet, suppress it. This keeps transfer-specific exclusions
-    // data-driven as the protocol evolves.
+    // Optional byte sequences associated with non-loot inventory transfers.
+    // SuppressLookbackBytes keeps the legacy byte-window check for backwards
+    // compatibility. SuppressStateTimeoutMilliseconds also lets a detected
+    // transfer marker arm a one-shot suppression state for the next reasonable
+    // loot candidate, which is more robust when TCP/relay framing inserts
+    // intermediate application packets between the marker and inventory-add.
+    public int SuppressLookbackBytes { get; set; }
+    public int SuppressStateTimeoutMilliseconds { get; set; }
     public List<string> SuppressIfPrecededBy { get; set; } = new();
 }
