@@ -42,6 +42,7 @@ public sealed class AppSettings
 
     // Optional global shortcuts. "None" leaves the shortcut unregistered.
     public string StartStopHotkey { get; set; } = "None";
+    public string PauseResumeHotkey { get; set; } = "None";
     public string OverlayHotkey { get; set; } = "None";
 
     // Used by the styled What's New dialog so each version is shown once.

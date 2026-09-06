@@ -104,7 +104,12 @@ public partial class OverlayWindow : Window
         Left = double.IsFinite(settings.OverlayLeft) ? settings.OverlayLeft : 30;
         Top = double.IsFinite(settings.OverlayTop) ? settings.OverlayTop : 80;
 
-        byte alpha = (byte)Math.Round(255 * Math.Clamp(settings.OverlayBackgroundOpacity, 0.10, 1.0));
+        SetBackgroundOpacity(settings.OverlayBackgroundOpacity);
+    }
+
+    public void SetBackgroundOpacity(double opacity)
+    {
+        byte alpha = (byte)Math.Round(255 * Math.Clamp(opacity, 0.10, 1.0));
         var background = new SolidColorBrush(Color.FromArgb(alpha, 7, 15, 22));
         background.Freeze();
         DetailedDesign.Background = background;

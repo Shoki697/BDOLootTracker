@@ -126,5 +126,38 @@
         "description": "Built-in and GitHub parser profiles were advanced to EU-2026.09.05.2 with the new Storage marker, 2-second one-shot transfer state and updated manifest hash."
       }
     ]
+  },
+  "0.12.4": {
+    "title": "v0.12.4 Session Controls & UX",
+    "changes": [
+      {
+        "title": "Pause and resume active sessions",
+        "description": "After a session starts, the main START button becomes PAUSE and then RESUME while paused. The dedicated STOP button still ends the session, including while paused."
+      },
+      {
+        "title": "Paused time is excluded from rates",
+        "description": "Pause freezes active session time, Silver/hr and Trash/hr while packet capture stays connected. Incoming loot is ignored until Resume, and SQLite stores the pause-correct active duration for Session History, Garmoth and screenshots."
+      },
+      {
+        "title": "Pause / Resume global keybind",
+        "description": "Settings → Keybinds includes a dedicated Pause / Resume Session shortcut. Start / Stop Tracking, Pause / Resume Session and Toggle Overlay cannot share the same shortcut."
+      },
+      {
+        "title": "Dynamic overlay state badge",
+        "description": "Detailed and Compact overlays now show STOPPED, STARTED or PAUSED instead of the static LIVE badge."
+      },
+      {
+        "title": "Simplified connection indicator",
+        "description": "The bottom-right network indicator now shows a clean Connected state instead of parser / ExitLag relay details. Full capture diagnostics remain available in Settings → Network."
+      },
+      {
+        "title": "Automatic short empty-session cleanup",
+        "description": "Sessions shorter than 5 minutes of active tracking time are discarded automatically only when they contain no tracked loot. Short sessions with loot and all sessions of 5 minutes or longer are still saved. No STOP confirmation popup is shown."
+      },
+      {
+        "title": "Live overlay opacity preview",
+        "description": "Moving the Overlay Opacity slider updates the visible overlay immediately. Save Changes persists the new opacity; closing Settings without saving restores the previously saved value."
+      }
+    ]
   }
 }

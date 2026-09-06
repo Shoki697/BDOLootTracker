@@ -50,6 +50,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const int WmHotKey = 0x0312;
     private const int StartStopHotkeyId = 0xB001;
     private const int OverlayHotkeyId = 0xB002;
+    private const int PauseResumeHotkeyId = 0xB003;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
@@ -99,7 +100,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private HashSet<uint> _garmothKnownItemIds = new();
 
     private DateTime? _sessionStartedUtc;
+    private DateTime? _activeSegmentStartedUtc;
+    private TimeSpan _activeElapsed = TimeSpan.Zero;
     private TimeSpan _stoppedElapsed = TimeSpan.Zero;
+    private bool _isSessionPaused;
     private long _sessionId;
 
     private readonly Dictionary<string, double> _spotScores = new(StringComparer.OrdinalIgnoreCase);
@@ -141,6 +145,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Brush _overlayButtonBorderBrush = new SolidColorBrush(Color.FromRgb(42, 62, 77));
     private string _updateBannerText = string.Empty;
     private Visibility _updateBannerVisibility = Visibility.Collapsed;
+    private string _trackerStateText = "STOPPED";
+    private Brush _trackerStateForeground = new SolidColorBrush(Color.FromRgb(150, 163, 175));
+    private Brush _trackerStateBackground = new SolidColorBrush(Color.FromArgb(42, 91, 104, 116));
+    private Brush _trackerStateBorderBrush = new SolidColorBrush(Color.FromArgb(102, 122, 137, 151));
 
     public ObservableCollection<LootRowViewModel> LootRows { get; } = new();
     public string VersionText { get; } = GetVersionText();
@@ -219,6 +227,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public Brush OverlayButtonBorderBrush { get => _overlayButtonBorderBrush; private set => SetField(ref _overlayButtonBorderBrush, value); }
     public string UpdateBannerText { get => _updateBannerText; private set => SetField(ref _updateBannerText, value); }
     public Visibility UpdateBannerVisibility { get => _updateBannerVisibility; private set => SetField(ref _updateBannerVisibility, value); }
+    public string TrackerStateText { get => _trackerStateText; private set => SetField(ref _trackerStateText, value); }
+    public Brush TrackerStateForeground { get => _trackerStateForeground; private set => SetField(ref _trackerStateForeground, value); }
+    public Brush TrackerStateBackground { get => _trackerStateBackground; private set => SetField(ref _trackerStateBackground, value); }
+    public Brush TrackerStateBorderBrush { get => _trackerStateBorderBrush; private set => SetField(ref _trackerStateBorderBrush, value); }
 
     public IEnumerable<LootRowViewModel> MainLootRows => GetSortedLootRows();
 
@@ -542,6 +554,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void Start_Click(object sender, RoutedEventArgs e)
     {
+        // After a session has started the same main button becomes PAUSE / RESUME.
+        // The dedicated STOP button (and Start/Stop global hotkey) still ends the session.
+        if (_sessionStartedUtc != null)
+        {
+            TogglePauseResumeSession();
+            return;
+        }
+
         if (_captureService.IsRunning)
             return;
 
@@ -596,11 +616,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _sessionLoot.Clear();
             ResetSpotDetection();
 
-            _sessionStartedUtc = DateTime.UtcNow;
+            DateTime now = DateTime.UtcNow;
+            _sessionStartedUtc = now;
+            _activeSegmentStartedUtc = now;
+            _activeElapsed = TimeSpan.Zero;
             _stoppedElapsed = TimeSpan.Zero;
+            _isSessionPaused = false;
             _parserProfileConfirmedThisSession = false;
             _parserRecoveryPromptShown = false;
-            _nextParserHealthCheckUtc = DateTime.UtcNow.AddSeconds(30);
+            _nextParserHealthCheckUtc = now.AddSeconds(30);
 
             CharacterClassOption? selectedClass = null;
             if (_settings.CharacterClassType != null)
@@ -633,8 +657,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _timer.Start();
             _autoSaveTimer.Start();
 
-            StartButton.IsEnabled = false;
             StopButton.IsEnabled = true;
+            UpdateSessionStateUi();
             UpdateGarmothUploadButtonState();
             string characterStatus = selectedClass == null
                 ? string.Empty
@@ -654,26 +678,90 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void Stop_Click(object sender, RoutedEventArgs e)
         => StopSession(saveSession: true);
 
+    private void TogglePauseResumeSession()
+    {
+        if (_sessionStartedUtc == null || !_captureService.IsRunning)
+            return;
+
+        if (_isSessionPaused)
+            ResumeSession();
+        else
+            PauseSession();
+    }
+
+    private void PauseSession()
+    {
+        if (_sessionStartedUtc == null || _isSessionPaused)
+            return;
+
+        AccumulateActiveSegment(DateTime.UtcNow);
+        _isSessionPaused = true;
+        _timer.Stop();
+
+        // Keep capture alive so ExitLag/BDO network state remains warm, but ignore
+        // incoming loot until RESUME. Persist the exact active duration immediately.
+        AutoSaveCurrentSession();
+        StatusText = "Session paused";
+        UpdateSessionStateUi();
+        RefreshMetrics();
+    }
+
+    private void ResumeSession()
+    {
+        if (_sessionStartedUtc == null || !_isSessionPaused)
+            return;
+
+        _activeSegmentStartedUtc = DateTime.UtcNow;
+        _isSessionPaused = false;
+        _timer.Start();
+        StatusText = _settings.ExitLagMode
+            ? "Tracking resumed • ExitLag"
+            : "Tracking resumed";
+        UpdateSessionStateUi();
+        RefreshMetrics();
+    }
+
     private void StopSession(bool saveSession)
     {
+        if (_sessionStartedUtc != null && !_isSessionPaused)
+            AccumulateActiveSegment(DateTime.UtcNow);
+
+        TimeSpan activeDuration = GetActiveSessionElapsed();
+        List<SessionLootSnapshot> finalSnapshot = CreateSessionSnapshot();
+
+        // Very short empty sessions are normally accidental START/STOP tests.
+        // Discard them silently instead of filling Session History with noise.
+        // Paused time is already excluded from activeDuration. A short session
+        // that contains even one tracked loot item is still preserved.
+        bool discardShortEmptySession =
+            saveSession &&
+            activeDuration < TimeSpan.FromMinutes(5) &&
+            !finalSnapshot.Any(item => item.Quantity > 0);
+
         if (_captureService.IsRunning)
             _captureService.Stop();
 
         _timer.Stop();
         _autoSaveTimer.Stop();
 
+        bool sessionSaved = false;
+        bool sessionDiscarded = false;
+
         if (_sessionId > 0)
         {
             try
             {
-                if (saveSession)
+                if (saveSession && !discardShortEmptySession)
                 {
-                    _database.EndSession(_sessionId, CreateSessionSnapshot());
-                        }
+                    _database.EndSession(_sessionId, finalSnapshot, activeDuration);
+                    sessionSaved = true;
+                }
                 else
                 {
-                    // Ha a capture már a START közben elhasal, ne maradjon üres/fél session a historyban.
+                    // Also covers capture failures during START and short empty
+                    // sessions that should not appear in Session History.
                     _database.DeleteSession(_sessionId);
+                    sessionDiscarded = discardShortEmptySession;
                 }
             }
             catch (Exception ex)
@@ -682,18 +770,85 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
         }
 
-        if (_sessionStartedUtc != null)
-            _stoppedElapsed = DateTime.UtcNow - _sessionStartedUtc.Value;
+        _stoppedElapsed = activeDuration;
 
-        if (saveSession && _sessionId > 0)
+        if (sessionSaved)
             StatusText = $"Session saved • {_settings.Region}";
+        else if (sessionDiscarded)
+            StatusText = "Short empty session discarded";
 
         _sessionId = 0;
         _sessionStartedUtc = null;
-        StartButton.IsEnabled = true;
+        _activeSegmentStartedUtc = null;
+        _activeElapsed = TimeSpan.Zero;
+        _isSessionPaused = false;
         StopButton.IsEnabled = false;
+        UpdateSessionStateUi();
         UpdateGarmothUploadButtonState();
         RefreshMetrics();
+    }
+
+    private void AccumulateActiveSegment(DateTime nowUtc)
+    {
+        if (_activeSegmentStartedUtc == null)
+            return;
+
+        TimeSpan segment = nowUtc - _activeSegmentStartedUtc.Value;
+        if (segment > TimeSpan.Zero)
+            _activeElapsed += segment;
+
+        _activeSegmentStartedUtc = null;
+    }
+
+    private TimeSpan GetActiveSessionElapsed()
+    {
+        if (_sessionStartedUtc == null)
+            return _stoppedElapsed;
+
+        TimeSpan elapsed = _activeElapsed;
+        if (!_isSessionPaused && _activeSegmentStartedUtc != null)
+        {
+            TimeSpan current = DateTime.UtcNow - _activeSegmentStartedUtc.Value;
+            if (current > TimeSpan.Zero)
+                elapsed += current;
+        }
+
+        return elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed;
+    }
+
+    private void UpdateSessionStateUi()
+    {
+        if (_sessionStartedUtc == null)
+        {
+            StartButton.Content = "▶  START";
+            StartButton.Background = new SolidColorBrush(Color.FromRgb(22, 138, 69));
+            StartButton.IsEnabled = true;
+            TrackerStateText = "STOPPED";
+            TrackerStateForeground = new SolidColorBrush(Color.FromRgb(150, 163, 175));
+            TrackerStateBackground = new SolidColorBrush(Color.FromArgb(42, 91, 104, 116));
+            TrackerStateBorderBrush = new SolidColorBrush(Color.FromArgb(102, 122, 137, 151));
+            return;
+        }
+
+        StartButton.IsEnabled = true;
+        if (_isSessionPaused)
+        {
+            StartButton.Content = "▶  RESUME";
+            StartButton.Background = new SolidColorBrush(Color.FromRgb(38, 118, 170));
+            TrackerStateText = "PAUSED";
+            TrackerStateForeground = new SolidColorBrush(Color.FromRgb(255, 194, 92));
+            TrackerStateBackground = new SolidColorBrush(Color.FromArgb(46, 194, 125, 27));
+            TrackerStateBorderBrush = new SolidColorBrush(Color.FromArgb(120, 237, 163, 58));
+        }
+        else
+        {
+            StartButton.Content = "Ⅱ  PAUSE";
+            StartButton.Background = new SolidColorBrush(Color.FromRgb(185, 126, 24));
+            TrackerStateText = "STARTED";
+            TrackerStateForeground = new SolidColorBrush(Color.FromRgb(66, 232, 155));
+            TrackerStateBackground = new SolidColorBrush(Color.FromArgb(42, 22, 165, 108));
+            TrackerStateBorderBrush = new SolidColorBrush(Color.FromArgb(102, 31, 213, 137));
+        }
     }
 
     private void AutoSaveCurrentSession()
@@ -703,9 +858,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         try
         {
-            // 10 másodpercenként akkor is frissítjük a LastSavedAtUtc mezőt,
-            // ha épp nem esett új loot. Így crash után az időtartam is közel pontos marad.
-            _database.SaveSessionProgress(_sessionId, CreateSessionSnapshot());
+            // Save active tracking time separately from wall-clock time so pauses
+            // do not reduce Silver/hr or Trash/hr in Session History after restart.
+            _database.SaveSessionProgress(_sessionId, CreateSessionSnapshot(), GetActiveSessionElapsed());
         }
         catch (Exception ex)
         {
@@ -740,7 +895,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void AddLoot(uint itemId, ulong quantity)
     {
-        if (_sessionStartedUtc == null)
+        if (_sessionStartedUtc == null || _isSessionPaused)
             return;
 
         // User-managed ignore list: ezek az ID-k már a sessionbe sem kerülnek be.
@@ -809,9 +964,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void RefreshMetrics()
     {
-        TimeSpan elapsed = _sessionStartedUtc == null
-            ? _stoppedElapsed
-            : DateTime.UtcNow - _sessionStartedUtc.Value;
+        TimeSpan elapsed = GetActiveSessionElapsed();
 
         SessionTimeText = $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
 
@@ -857,7 +1010,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         // Conservative heuristic: only warn after a session has been running for
         // several minutes, substantial BDO server traffic is present, and the
         // parser has not produced a single valid loot event.
-        TimeSpan elapsed = now - _sessionStartedUtc.Value;
+        if (_isSessionPaused)
+            return;
+
+        TimeSpan elapsed = GetActiveSessionElapsed();
         if (elapsed < TimeSpan.FromMinutes(6) ||
             _captureService.ServerPayloadBytesReceived < 5_000_000 ||
             _captureService.ValidLootCount > 0)
@@ -924,8 +1080,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         Dispatcher.BeginInvoke(() =>
         {
-            ConnectionText = status;
-            StatusBrush = status.StartsWith("Connected", StringComparison.OrdinalIgnoreCase) ? Brushes.LimeGreen : Brushes.Gray;
+            bool connected = status.StartsWith("Connected", StringComparison.OrdinalIgnoreCase);
+
+            // Keep the bottom-right indicator intentionally simple. Detailed
+            // parser / ExitLag relay information remains available in Network
+            // Diagnostics and the main status text when it is actionable.
+            ConnectionText = connected ? "Connected" : "Stopped";
+            StatusBrush = connected ? Brushes.LimeGreen : Brushes.Gray;
         });
     }
 
@@ -1088,6 +1249,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 Owner = this
             };
             window.MoveOverlayRequested += (_, _) => BeginOverlayPlacement(window);
+            window.OverlayOpacityPreviewChanged += opacity =>
+            {
+                if (!_settings.OverlayEnabled)
+                    return;
+
+                EnsureOverlayWindowVisible();
+                _overlayWindow?.SetBackgroundOpacity(opacity);
+            };
             window.OverlayResetRequested += (_, _) =>
             {
                 _settings = _settingsService.Load();
@@ -1475,11 +1644,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         int id = wParam.ToInt32();
         if (id == StartStopHotkeyId)
         {
-            if (_captureService.IsRunning)
+            if (_sessionStartedUtc != null)
                 StopSession(saveSession: true);
             else
                 Start_Click(StartButton, new RoutedEventArgs());
 
+            handled = true;
+        }
+        else if (id == PauseResumeHotkeyId)
+        {
+            TogglePauseResumeSession();
             handled = true;
         }
         else if (id == OverlayHotkeyId)
@@ -1501,6 +1675,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var errors = new List<string>();
         RegisterConfiguredHotkey(_settings.StartStopHotkey, StartStopHotkeyId, "Start / Stop Tracking", errors);
+        RegisterConfiguredHotkey(_settings.PauseResumeHotkey, PauseResumeHotkeyId, "Pause / Resume Session", errors);
         RegisterConfiguredHotkey(_settings.OverlayHotkey, OverlayHotkeyId, "Toggle Overlay", errors);
 
         if (errors.Count == 0)
@@ -1538,6 +1713,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
 
         UnregisterHotKey(_mainHwnd, StartStopHotkeyId);
+        UnregisterHotKey(_mainHwnd, PauseResumeHotkeyId);
         UnregisterHotKey(_mainHwnd, OverlayHotkeyId);
     }
 

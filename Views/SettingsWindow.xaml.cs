@@ -26,6 +26,7 @@ public partial class SettingsWindow : Window
 
     public event EventHandler? MoveOverlayRequested;
     public event EventHandler? OverlayResetRequested;
+    public event Action<double>? OverlayOpacityPreviewChanged;
 
     public SettingsWindow(SettingsService settingsService, CaptureService? captureService = null)
     {
@@ -131,6 +132,7 @@ public partial class SettingsWindow : Window
         OverlaySortByCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
         OverlaySortOrderCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
         StartStopHotkeyBox.TextChanged += (_, _) => UpdateSaveButtonState();
+        PauseResumeHotkeyBox.TextChanged += (_, _) => UpdateSaveButtonState();
         OverlayHotkeyBox.TextChanged += (_, _) => UpdateSaveButtonState();
     }
 
@@ -229,6 +231,12 @@ public partial class SettingsWindow : Window
             return true;
 
         if (!string.Equals(
+                NormalizeHotkeyText(PauseResumeHotkeyBox.Text),
+                NormalizeHotkeyText(_settings.PauseResumeHotkey),
+                StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(
                 NormalizeHotkeyText(OverlayHotkeyBox.Text),
                 NormalizeHotkeyText(_settings.OverlayHotkey),
                 StringComparison.OrdinalIgnoreCase))
@@ -300,6 +308,7 @@ public partial class SettingsWindow : Window
         OverlaySortOrderCombo.SelectedItem = _settings.OverlaySortDescending ? "Descending" : "Ascending";
 
         StartStopHotkeyBox.Text = NormalizeHotkeyText(_settings.StartStopHotkey);
+        PauseResumeHotkeyBox.Text = NormalizeHotkeyText(_settings.PauseResumeHotkey);
         OverlayHotkeyBox.Text = NormalizeHotkeyText(_settings.OverlayHotkey);
 
         ReloadCharacterClassesFromCurrentPath(
@@ -843,13 +852,27 @@ public partial class SettingsWindow : Window
         bool classSelected = selectedClass != null && selectedClass.ClassType >= 0;
 
         string startStopHotkey = NormalizeHotkeyText(StartStopHotkeyBox.Text);
+        string pauseResumeHotkey = NormalizeHotkeyText(PauseResumeHotkeyBox.Text);
         string overlayHotkey = NormalizeHotkeyText(OverlayHotkeyBox.Text);
-        if (!string.Equals(startStopHotkey, "None", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(startStopHotkey, overlayHotkey, StringComparison.OrdinalIgnoreCase))
+
+        var configuredHotkeys = new[]
         {
+            (Label: "Start / Stop Tracking", Hotkey: startStopHotkey),
+            (Label: "Pause / Resume Session", Hotkey: pauseResumeHotkey),
+            (Label: "Toggle Overlay", Hotkey: overlayHotkey)
+        };
+
+        var duplicate = configuredHotkeys
+            .Where(x => !string.Equals(x.Hotkey, "None", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(x => x.Hotkey, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+
+        if (duplicate != null)
+        {
+            string labels = string.Join(" and ", duplicate.Select(x => x.Label));
             AppDialog.Show(
-                "Start / Stop Tracking and Toggle Overlay must use different shortcuts.",
-                "Keybinds",
+                $"{duplicate.Key} is assigned to both {labels}.\n\nChoose a different shortcut for one of them.",
+                "Duplicate keybind",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
@@ -876,6 +899,7 @@ public partial class SettingsWindow : Window
         settingsToSave.OverlaySortBy = NormalizeOverlaySortBy(OverlaySortByCombo.SelectedItem?.ToString());
         settingsToSave.OverlaySortDescending = OverlaySortOrderCombo.SelectedItem?.ToString() != "Ascending";
         settingsToSave.StartStopHotkey = startStopHotkey;
+        settingsToSave.PauseResumeHotkey = pauseResumeHotkey;
         settingsToSave.OverlayHotkey = overlayHotkey;
 
         _settingsService.Save(settingsToSave);
@@ -967,8 +991,10 @@ public partial class SettingsWindow : Window
         MoveOverlayButton.IsEnabled = enabled;
         ResetOverlayPositionButton.IsEnabled = enabled;
         StartStopHotkeyBox.IsEnabled = enabled;
+        PauseResumeHotkeyBox.IsEnabled = enabled;
         OverlayHotkeyBox.IsEnabled = enabled;
         ClearStartStopHotkeyButton.IsEnabled = enabled;
+        ClearPauseResumeHotkeyButton.IsEnabled = enabled;
         ClearOverlayHotkeyButton.IsEnabled = enabled;
         SpecCombo.IsEnabled = enabled &&
                               ClassCombo.SelectedItem is CharacterClassOption selected &&
@@ -989,6 +1015,12 @@ public partial class SettingsWindow : Window
     {
         if (OverlayOpacityValueText != null)
             OverlayOpacityValueText.Text = $"{e.NewValue:0}%";
+
+        if (!_isLoading)
+        {
+            double opacity = Math.Clamp(e.NewValue / 100.0, 0.10, 1.0);
+            OverlayOpacityPreviewChanged?.Invoke(opacity);
+        }
     }
 
     private void OverlayMaxItemsBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
@@ -1105,6 +1137,9 @@ public partial class SettingsWindow : Window
 
     private void ClearStartStopHotkey_Click(object sender, RoutedEventArgs e)
         => StartStopHotkeyBox.Text = "None";
+
+    private void ClearPauseResumeHotkey_Click(object sender, RoutedEventArgs e)
+        => PauseResumeHotkeyBox.Text = "None";
 
     private void ClearOverlayHotkey_Click(object sender, RoutedEventArgs e)
         => OverlayHotkeyBox.Text = "None";

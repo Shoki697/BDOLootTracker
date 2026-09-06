@@ -18,10 +18,13 @@ public sealed class SessionSummary
     public DateTime? GarmothUploadedAtUtc { get; init; }
     public int GarmothUploadCount { get; init; }
     public int? DropRatePercent { get; init; }
+    public TimeSpan? ActiveDuration { get; init; }
 
-    public TimeSpan Duration => EffectiveEndUtc > StartedAtUtc
-        ? EffectiveEndUtc - StartedAtUtc
-        : TimeSpan.Zero;
+    public TimeSpan Duration => ActiveDuration is { } active && active >= TimeSpan.Zero
+        ? active
+        : EffectiveEndUtc > StartedAtUtc
+            ? EffectiveEndUtc - StartedAtUtc
+            : TimeSpan.Zero;
 
     public decimal SilverPerHour => Duration.TotalHours > 0.0001
         ? TotalSilver / (decimal)Duration.TotalHours

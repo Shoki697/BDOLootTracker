@@ -89,6 +89,7 @@ public sealed class DatabaseService
                 StartedAtUtc    TEXT NOT NULL,
                 EndedAtUtc      TEXT NULL,
                 LastSavedAtUtc  TEXT NULL,
+                ActiveDurationSeconds INTEGER NULL,
                 Region          TEXT NOT NULL,
                 CharacterName   TEXT NULL,
                 ClassType       INTEGER NULL,
@@ -150,6 +151,7 @@ public sealed class DatabaseService
         EnsureColumn(connection, "ItemPrices", "CurrentStock", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(connection, "ItemPrices", "TotalTrades", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(connection, "Sessions", "LastSavedAtUtc", "TEXT NULL");
+        EnsureColumn(connection, "Sessions", "ActiveDurationSeconds", "INTEGER NULL");
         EnsureColumn(connection, "Sessions", "ClassType", "INTEGER NULL");
         EnsureColumn(connection, "Sessions", "ClassName", "TEXT NULL");
         EnsureColumn(connection, "Sessions", "Spec", "TEXT NULL");
@@ -1152,9 +1154,9 @@ public sealed class DatabaseService
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO Sessions(
-                StartedAtUtc, LastSavedAtUtc, Region, CharacterName, ClassType, ClassName, Spec)
+                StartedAtUtc, LastSavedAtUtc, ActiveDurationSeconds, Region, CharacterName, ClassType, ClassName, Spec)
             VALUES (
-                $started, $saved, $region, $character, $classType, $className, $spec);
+                $started, $saved, NULL, $region, $character, $classType, $className, $spec);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$started", now);
@@ -1168,7 +1170,10 @@ public sealed class DatabaseService
         return (long)(command.ExecuteScalar() ?? 0L);
     }
 
-    public void SaveSessionProgress(long sessionId, IReadOnlyCollection<SessionLootSnapshot> loot)
+    public void SaveSessionProgress(
+        long sessionId,
+        IReadOnlyCollection<SessionLootSnapshot> loot,
+        TimeSpan activeDuration)
     {
         if (sessionId <= 0)
             return;
@@ -1181,15 +1186,19 @@ public sealed class DatabaseService
 
         using var update = connection.CreateCommand();
         update.Transaction = transaction;
-        update.CommandText = "UPDATE Sessions SET LastSavedAtUtc = $saved WHERE SessionId = $id;";
+        update.CommandText = "UPDATE Sessions SET LastSavedAtUtc = $saved, ActiveDurationSeconds = $duration WHERE SessionId = $id;";
         update.Parameters.AddWithValue("$saved", DateTime.UtcNow.ToString("O"));
+        update.Parameters.AddWithValue("$duration", ToDurationSeconds(activeDuration));
         update.Parameters.AddWithValue("$id", sessionId);
         update.ExecuteNonQuery();
 
         transaction.Commit();
     }
 
-    public void EndSession(long sessionId, IReadOnlyCollection<SessionLootSnapshot> loot)
+    public void EndSession(
+        long sessionId,
+        IReadOnlyCollection<SessionLootSnapshot> loot,
+        TimeSpan activeDuration)
     {
         if (sessionId <= 0)
             return;
@@ -1204,15 +1213,19 @@ public sealed class DatabaseService
         using (var update = connection.CreateCommand())
         {
             update.Transaction = transaction;
-            update.CommandText = "UPDATE Sessions SET EndedAtUtc = $ended, LastSavedAtUtc = $saved WHERE SessionId = $id;";
+            update.CommandText = "UPDATE Sessions SET EndedAtUtc = $ended, LastSavedAtUtc = $saved, ActiveDurationSeconds = $duration WHERE SessionId = $id;";
             update.Parameters.AddWithValue("$ended", now);
             update.Parameters.AddWithValue("$saved", now);
+            update.Parameters.AddWithValue("$duration", ToDurationSeconds(activeDuration));
             update.Parameters.AddWithValue("$id", sessionId);
             update.ExecuteNonQuery();
         }
 
         transaction.Commit();
     }
+
+    private static long ToDurationSeconds(TimeSpan duration)
+        => Math.Max(0L, checked((long)Math.Round(Math.Max(0, duration.TotalSeconds))));
 
     private static void SaveSessionLootRows(
         SqliteConnection connection,
@@ -1299,7 +1312,8 @@ public sealed class DatabaseService
                 COALESCE(s.SpotName, ''),
                 s.GarmothUploadedAtUtc,
                 COALESCE(s.GarmothUploadCount, 0),
-                s.DropRatePercent
+                s.DropRatePercent,
+                s.ActiveDurationSeconds
             FROM Sessions s
             LEFT JOIN SessionLoot sl ON sl.SessionId = s.SessionId
             LEFT JOIN Items i ON i.ItemId = sl.ItemId
@@ -1355,7 +1369,10 @@ public sealed class DatabaseService
                 SpotName = reader.GetString(12),
                 GarmothUploadedAtUtc = reader.IsDBNull(13) ? null : ParseDbDate(reader.GetString(13)),
                 GarmothUploadCount = reader.IsDBNull(14) ? 0 : checked((int)reader.GetInt64(14)),
-                DropRatePercent = reader.IsDBNull(15) ? null : checked((int)reader.GetInt64(15))
+                DropRatePercent = reader.IsDBNull(15) ? null : checked((int)reader.GetInt64(15)),
+                ActiveDuration = reader.IsDBNull(16)
+                    ? null
+                    : TimeSpan.FromSeconds(Math.Max(0, reader.GetInt64(16)))
             });
         }
 

@@ -48,23 +48,26 @@
                                            FontWeight="SemiBold"
                                            FontSize="12"
                                            TextTrimming="CharacterEllipsis"
-                                           MaxWidth="190" />
+                                           MaxWidth="170" />
                                 <TextBlock Text="  •  " Foreground="{StaticResource Muted}" FontSize="11" />
                                 <TextBlock Text="{Binding HeaderClassText}"
                                            Foreground="{StaticResource Text}"
                                            FontWeight="SemiBold"
                                            FontSize="12"
                                            TextTrimming="CharacterEllipsis"
-                                           MaxWidth="145" />
+                                           MaxWidth="120" />
                             </StackPanel>
                             <Border Grid.Column="1"
-                                    Background="#2A16A56C"
-                                    BorderBrush="#661FD589"
+                                    Background="{Binding TrackerStateBackground}"
+                                    BorderBrush="{Binding TrackerStateBorderBrush}"
                                     BorderThickness="1"
                                     CornerRadius="7"
                                     Padding="7,2"
                                     Margin="8,0,0,0">
-                                <TextBlock Text="LIVE" Foreground="#42E89B" FontSize="9" FontWeight="Bold" />
+                                <TextBlock Text="{Binding TrackerStateText}"
+                                           Foreground="{Binding TrackerStateForeground}"
+                                           FontSize="9"
+                                           FontWeight="Bold" />
                             </Border>
                         </Grid>
 
@@ -185,21 +188,39 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Orientation="Horizontal">
-                            <TextBlock Text="{Binding HeaderSpotText}"
-                                       Foreground="{StaticResource Accent}"
-                                       FontWeight="SemiBold"
-                                       FontSize="11"
-                                       TextTrimming="CharacterEllipsis"
-                                       MaxWidth="190" />
-                            <TextBlock Text="  •  " Foreground="{StaticResource Muted}" FontSize="10" />
-                            <TextBlock Text="{Binding HeaderClassText}"
-                                       Foreground="{StaticResource Text}"
-                                       FontWeight="SemiBold"
-                                       FontSize="11"
-                                       TextTrimming="CharacterEllipsis"
-                                       MaxWidth="145" />
-                        </StackPanel>
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding HeaderSpotText}"
+                                           Foreground="{StaticResource Accent}"
+                                           FontWeight="SemiBold"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="170" />
+                                <TextBlock Text="  •  " Foreground="{StaticResource Muted}" FontSize="10" />
+                                <TextBlock Text="{Binding HeaderClassText}"
+                                           Foreground="{StaticResource Text}"
+                                           FontWeight="SemiBold"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="120" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Background="{Binding TrackerStateBackground}"
+                                    BorderBrush="{Binding TrackerStateBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="7"
+                                    Padding="7,2"
+                                    Margin="8,0,0,0">
+                                <TextBlock Text="{Binding TrackerStateText}"
+                                           Foreground="{Binding TrackerStateForeground}"
+                                           FontSize="8.5"
+                                           FontWeight="Bold" />
+                            </Border>
+                        </Grid>
 
                         <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions>
