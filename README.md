@@ -9,7 +9,6 @@ BDO Loot Tracker uses **Npcap** to passively capture Black Desert Online network
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
 
 [Download the latest release](https://github.com/Shoki697/BDOLootTracker/releases)
-<<<<<<< HEAD
 =======
 
 >>>>>>> 9de90cd (Release 0.12.1 UI Garmoth Sassions change)
