@@ -230,6 +230,7 @@ public sealed class DatabaseService
             INSERT OR IGNORE INTO ItemPrices(ItemId, Region, UnitPrice, UpdatedAtUtc)
             VALUES (1, 'EU', 1, $updated),
                    (1, 'NA', 1, $updated),
+                   (1, 'MENA', 1, $updated),
                    (1, 'SEA', 1, $updated);
             """;
         silverPrice.Parameters.AddWithValue("$updated", DateTime.UtcNow.ToString("O"));
@@ -1128,7 +1129,17 @@ public sealed class DatabaseService
         => $"market_{NormalizeRegion(region).ToLowerInvariant()}_updated_utc";
 
     public static string NormalizeRegion(string region)
-        => string.IsNullOrWhiteSpace(region) ? "EU" : region.Trim().ToUpperInvariant();
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            return "EU";
+
+        string value = region.Trim().ToUpperInvariant();
+        return value switch
+        {
+            "TR" or "TR/MENA" or "TRMENA" => "MENA",
+            _ => value
+        };
+    }
 
     public static string NormalizeLanguage(string language)
     {

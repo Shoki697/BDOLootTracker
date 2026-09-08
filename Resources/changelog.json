@@ -159,5 +159,26 @@
         "description": "Moving the Overlay Opacity slider updates the visible overlay immediately. Save Changes persists the new opacity; closing Settings without saving restores the previously saved value."
       }
     ]
+  },
+  "0.12.5": {
+    "title": "v0.12.5 Screenshot Quality & MENA Region",
+    "changes": [
+      {
+        "title": "Sharper session share cards",
+        "description": "Session screenshots now render at 3x logical resolution with high-quality bitmap scaling for sharper text, borders, branding and loot icons while keeping the same compact share-card layout."
+      },
+      {
+        "title": "Total Session Time in screenshot header",
+        "description": "The screenshot header now shows TOTAL SESSION TIME in the upper-right corner. Duration was removed from the metadata line so it is immediately clear which active session time is used for Silver/hr and Trash/hr calculations."
+      },
+      {
+        "title": "MENA Loot / Price Server support",
+        "description": "Settings → Database & Loot now includes MENA alongside EU and NA. MENA uses its own region-specific price cache and the Garmoth external grind-tracker feed with the mena region key."
+      },
+      {
+        "title": "Region-safe database handling",
+        "description": "Silver seed data and database metadata now include MENA, with TR / TR-MENA aliases normalized to MENA so market prices remain isolated from EU and NA caches."
+      }
+    ]
   }
 }

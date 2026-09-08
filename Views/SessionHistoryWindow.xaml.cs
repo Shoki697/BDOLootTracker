@@ -368,7 +368,10 @@ public partial class SessionHistoryWindow : Window
         visual.Arrange(new Rect(0, 0, width, height));
         visual.UpdateLayout();
 
-        const double renderScale = 2.0;
+        // Render the logical 560px share card at 3x resolution. This keeps the
+        // compact layout while producing a much sharper PNG for Discord / sharing.
+        const double renderScale = 3.0;
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.HighQuality);
         var bitmap = new RenderTargetBitmap(
             (int)Math.Ceiling(width * renderScale),
             (int)Math.Ceiling(height * renderScale),
@@ -400,6 +403,10 @@ public partial class SessionHistoryWindow : Window
         };
         var stack = (StackPanel)root.Child;
 
+        var header = new Grid();
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
         var brand = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -408,14 +415,16 @@ public partial class SessionHistoryWindow : Window
         ImageSource? appIcon = TryLoadPackImage("pack://application:,,,/Resources/HeaderLogo.png");
         if (appIcon != null)
         {
-            brand.Children.Add(new Image
+            var logoImage = new Image
             {
                 Source = appIcon,
                 Width = 40,
                 Height = 40,
                 Stretch = Stretch.Uniform,
                 Margin = new Thickness(0, 0, 10, 0)
-            });
+            };
+            RenderOptions.SetBitmapScalingMode(logoImage, BitmapScalingMode.HighQuality);
+            brand.Children.Add(logoImage);
         }
         brand.Children.Add(new TextBlock
         {
@@ -425,7 +434,37 @@ public partial class SessionHistoryWindow : Window
             FontWeight = FontWeights.Bold,
             VerticalAlignment = VerticalAlignment.Center
         });
-        stack.Children.Add(brand);
+        Grid.SetColumn(brand, 0);
+        header.Children.Add(brand);
+
+        var sessionTime = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0)
+        };
+        sessionTime.Children.Add(new TextBlock
+        {
+            Text = "TOTAL SESSION TIME",
+            Foreground = muted,
+            FontSize = 9.5,
+            FontWeight = FontWeights.SemiBold,
+            TextAlignment = TextAlignment.Right,
+            HorizontalAlignment = HorizontalAlignment.Right
+        });
+        sessionTime.Children.Add(new TextBlock
+        {
+            Text = session.DurationText,
+            Foreground = text,
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 2, 0, 0),
+            TextAlignment = TextAlignment.Right,
+            HorizontalAlignment = HorizontalAlignment.Right
+        });
+        Grid.SetColumn(sessionTime, 1);
+        header.Children.Add(sessionTime);
+        stack.Children.Add(header);
 
         stack.Children.Add(new TextBlock
         {
@@ -441,7 +480,7 @@ public partial class SessionHistoryWindow : Window
             : string.IsNullOrWhiteSpace(session.Spec) ? session.ClassName : $"{session.ClassName} • {session.Spec}";
         stack.Children.Add(new TextBlock
         {
-            Text = $"{session.DateText}  •  {session.DurationText}  •  {classText}",
+            Text = $"{session.DateText}  •  {classText}",
             Foreground = muted,
             FontSize = 11.5,
             Margin = new Thickness(0, 4, 0, 12)
@@ -504,12 +543,14 @@ public partial class SessionHistoryWindow : Window
             ImageSource? source = TryLoadImage(row.IconPath);
             if (source != null)
             {
-                slotGrid.Children.Add(new Image
+                var lootImage = new Image
                 {
                     Source = source,
                     Stretch = Stretch.Uniform,
                     Margin = new Thickness(1)
-                });
+                };
+                RenderOptions.SetBitmapScalingMode(lootImage, BitmapScalingMode.HighQuality);
+                slotGrid.Children.Add(lootImage);
             }
 
             var qtyBadge = new Border

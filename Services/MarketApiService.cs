@@ -37,11 +37,13 @@ public sealed class MarketApiService
     {
         region = DatabaseService.NormalizeRegion(region);
 
-        // A referenciaként használt tracker jelenlegi forrása explicit EU / NA régiót támogat.
-        if (region is not ("EU" or "NA"))
+        // The external grind-tracker feed accepts the same lowercase region keys used
+        // by Garmoth's market/grind data. Keep the allow-list explicit so a typo in
+        // settings can never overwrite an unrelated local price cache.
+        if (region is not ("EU" or "NA" or "MENA"))
         {
             throw new NotSupportedException(
-                $"The Garmoth grind-tracker data source is currently configured only for EU and NA. Selected region: {region}");
+                $"Unsupported Loot / Price Server: {region}. Supported regions: EU, NA, MENA.");
         }
 
         string url = $"{BaseUrl}?region={region.ToLowerInvariant()}&lang=us";

@@ -278,7 +278,7 @@ public partial class SettingsWindow : Window
 
     private void LoadValues()
     {
-        RegionCombo.ItemsSource = new[] { "EU", "NA" };
+        RegionCombo.ItemsSource = new[] { "EU", "NA", "MENA" };
         RegionCombo.SelectedItem = DatabaseService.NormalizeRegion(_settings.Region);
         if (RegionCombo.SelectedIndex < 0)
             RegionCombo.SelectedIndex = 0;
