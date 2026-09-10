@@ -23,6 +23,32 @@ public sealed class MarketApiService
     private const string GrindSpotsUrl = "https://api.garmoth.com/api/grind-tracker/getGrindSpots";
     private readonly HttpClient _httpClient;
     private List<GrindSpotRecord> _inlineSpots = new();
+    private HashSet<uint> _lastGarmothDropItemIds = new();
+
+    // Sea Monster Hunting is exposed in the UI as one regular grind spot.
+    // Garmoth's generic drop feed contains these items even when its spot -> drop
+    // relationship feed is incomplete for ocean content. We only add IDs that are
+    // present in the freshly downloaded Garmoth drop dataset for the selected region.
+    // This keeps the existing "Garmoth-only loot" checkbox authoritative and avoids
+    // turning packet-only / unknown currencies into tracked Sea Monster loot.
+    private static readonly uint[] SeaMonsterGarmothLootCandidates =
+    {
+        756051, // Sea Monster's Spirit Touch
+        756055, // Ferocious Sea Monster's Spirit Touch
+        8025,   // Saltwater Crocodile's Scale
+        8011,   // Violent Sea Monster's Ooze
+        8009,   // Violent Sea Monster's Scale
+        8008,   // Violent Sea Monster's Bone
+        756056, // Sea Monster's Bizarre Fang
+        9727,   // Great Ocean Oil
+        6533,   // Coral Crystal
+        59328,  // Moss-Covered Map
+        4987,   // Concentrated Magical Black Gem
+        721002, // Ancient Spirit Dust
+        4915,   // Manos Stone
+        8110,   // Blue Spirit Essence
+        766107  // Imperfect Lightstone of Flora
+    };
 
     public MarketApiService(HttpClient httpClient)
     {
@@ -120,11 +146,18 @@ public sealed class MarketApiService
                 "The existing price database will not be overwritten.");
         }
 
-        return result
+        var normalizedMarket = result
             .GroupBy(x => x.ItemId)
             .Select(g => g.First())
             .OrderBy(x => x.ItemId)
             .ToList();
+
+        _lastGarmothDropItemIds = normalizedMarket
+            .Select(x => x.ItemId)
+            .Where(x => x > 0)
+            .ToHashSet();
+
+        return normalizedMarket;
     }
 
     public async Task<List<GrindSpotRecord>> DownloadGrindSpotsAsync(
@@ -155,12 +188,55 @@ public sealed class MarketApiService
         }
 
         var merged = NormalizeSpotRecords(_inlineSpots.Concat(dedicated));
+        merged = EnsureSeaMonsterSpot(merged);
+
         if (merged.Count >= 10)
             return merged;
 
         throw new InvalidDataException(
             $"The Garmoth grind spot reference returned suspiciously few usable spots ({merged.Count}). " +
             "The existing local spot database will not be overwritten.");
+    }
+
+    private List<GrindSpotRecord> EnsureSeaMonsterSpot(List<GrindSpotRecord> spots)
+    {
+        uint[] garmothSeaLoot = SeaMonsterGarmothLootCandidates
+            .Where(_lastGarmothDropItemIds.Contains)
+            .Distinct()
+            .ToArray();
+
+        if (garmothSeaLoot.Length == 0)
+            return spots;
+
+        int existingIndex = spots.FindIndex(x =>
+            !string.IsNullOrWhiteSpace(x.Name) &&
+            x.Name.Contains("sea monster", StringComparison.OrdinalIgnoreCase));
+
+        if (existingIndex >= 0)
+        {
+            GrindSpotRecord existing = spots[existingIndex];
+            spots[existingIndex] = new GrindSpotRecord
+            {
+                SpotKey = existing.SpotKey,
+                Name = existing.Name,
+                ItemIds = existing.ItemIds
+                    .Concat(garmothSeaLoot)
+                    .Where(x => x > 0)
+                    .Distinct()
+                    .ToArray()
+            };
+        }
+        else
+        {
+            spots.Add(new GrindSpotRecord
+            {
+                SpotKey = "sea-monster",
+                Name = "Sea Monster",
+                ItemIds = garmothSeaLoot
+            });
+        }
+
+        return NormalizeSpotRecords(spots);
     }
 
     private static List<GrindSpotRecord> NormalizeSpotRecords(IEnumerable<GrindSpotRecord> spots)

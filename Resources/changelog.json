@@ -180,5 +180,22 @@
         "description": "Silver seed data and database metadata now include MENA, with TR / TR-MENA aliases normalized to MENA so market prices remain isolated from EU and NA caches."
       }
     ]
+  },
+  "0.12.6": {
+    "title": "v0.12.6 Sea Monster Spot Support",
+    "changes": [
+      {
+        "title": "Sea Monster grind spot detection",
+        "description": "Sea Monster Hunting is now handled as a normal grind spot. The tracker supplements incomplete ocean spot mappings with Sea Monster loot IDs that are present in the freshly downloaded Garmoth drop dataset, then uses the same weighted spot-detection logic as every other grind spot."
+      },
+      {
+        "title": "Garmoth-only filtering stays authoritative",
+        "description": "The existing Show and track only loot items known by Garmoth option also applies to Sea Monster sessions. Only Sea Monster items confirmed by the downloaded Garmoth dataset are added to the spot mapping, so packet-only currencies and unknown items are not pulled into this fallback spot."
+      },
+      {
+        "title": "Future-proof Garmoth mapping",
+        "description": "If Garmoth exposes a native Sea Monster spot entry, the tracker augments that entry instead of creating a duplicate fallback spot, preserving the normal Garmoth spot key whenever possible."
+      }
+    ]
   }
 }
