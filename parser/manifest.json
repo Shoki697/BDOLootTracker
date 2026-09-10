@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "latestProfileVersion": "EU-2026.09.05.2",
+  "latestProfileVersion": "EU-2026.09.10.1",
   "profileUrl": "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/eu-current.json",
-  "profileSha256": "84575c179814202080b2a75fc96feccfa8475f8a33523d3095242a0c20c818f4",
+  "profileSha256": "e6d52a8314aaf4e6b962690f53f33717cca9246259ea63b7a8c9fb66e3a0e072",
   "sampleVersion": "",
   "sampleUrl": "",
   "sampleSha256": "",
-  "notes": "2026-09-05 v2 transfer profile: adds the BE 16 Storage variant plus one-shot transfer state suppression. ExitLag mirrored-transfer protection is handled by CaptureService so a relay that misses a marker cannot lock on a Storage/Maid/Market inventory-add event."
+  "notes": "2026-09-10 maintenance parser update: server port remains 8889; loot signature changed to 6F 0D 00 with ItemId offset 29 and Quantity offset 33. Existing Storage/Maid/Central Market suppression markers are preserved."
 }
