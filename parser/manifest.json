@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "latestProfileVersion": "EU-2026.09.10.1",
+  "latestProfileVersion": "EU-2026.09.10.2",
   "profileUrl": "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/eu-current.json",
-  "profileSha256": "e6d52a8314aaf4e6b962690f53f33717cca9246259ea63b7a8c9fb66e3a0e072",
+  "profileSha256": "bfc33921679242928659c52481fd8f3bcefe219552d696e89f3e8f7e3a6d9058",
   "sampleVersion": "",
   "sampleUrl": "",
   "sampleSha256": "",
-  "notes": "2026-09-10 maintenance parser update: server port remains 8889; loot signature changed to 6F 0D 00 with ItemId offset 29 and Quantity offset 33. Existing Storage/Maid/Central Market suppression markers are preserved."
+  "notes": "2026-09-10 v2: verified current loot parser after maintenance and updated Storage/Maid and Market/Maid transfer suppression markers. Storage withdrawal marker: 06 00 00 3E 10 00. Market withdrawal marker: 06 00 00 3E 10 02. Loot signature remains 6F 0D 00, item offset 29, quantity offset 33, server port 8889."
 }

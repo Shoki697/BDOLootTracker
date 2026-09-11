@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "profileVersion": "EU-2026.09.10.1",
+  "profileVersion": "EU-2026.09.10.2",
   "region": "EU",
   "serverPort": 8889,
   "signature": "6F 0D 00",
@@ -17,8 +17,8 @@
   "suppressStateTimeoutMilliseconds": 2000,
   "suppressIfPrecededBy": [
     "06 00 00 E7 12 02",
-    "06 00 00 6C 10 00",
-    "06 00 00 6C 10 02",
+    "06 00 00 3E 10 00",
+    "06 00 00 3E 10 02",
     "28 00 00 BE 16"
   ]
 }
