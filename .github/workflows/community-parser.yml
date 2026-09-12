@@ -1,0 +1,244 @@
+name: Publish Community Parser Candidate
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: community-parser-publish
+  cancel-in-progress: false
+
+jobs:
+  validate-and-publish:
+    if: startsWith(github.event.issue.title, '[Parser Calibration]')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate calibration and build candidate
+        id: validate
+        shell: bash
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          body = os.environ.get("ISSUE_BODY", "")
+          issue_number = int(os.environ.get("ISSUE_NUMBER", "0"))
+          issue_url = os.environ.get("ISSUE_URL", "")
+          result_path = Path("community-result.txt")
+
+          def finish(message, publish=False):
+              result_path.write_text(message + "\n", encoding="utf-8")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+                  out.write(f"publish={'true' if publish else 'false'}\n")
+
+          def fail(message):
+              finish("❌ Calibration was not published. " + message, False)
+              raise SystemExit(0)
+
+          begin = "<!-- BDO_PARSER_REPORT_BEGIN -->"
+          end = "<!-- BDO_PARSER_REPORT_END -->"
+          if begin not in body or end not in body:
+              fail("The calibration report markers are missing.")
+
+          raw = body.split(begin, 1)[1].split(end, 1)[0].strip()
+          raw = re.sub(r"^```json\s*", "", raw, flags=re.I)
+          raw = re.sub(r"\s*```$", "", raw)
+
+          try:
+              report = json.loads(raw)
+          except Exception as exc:
+              fail(f"The calibration report is not valid JSON: {exc}")
+
+          if report.get("schemaVersion") != 1:
+              fail("Unsupported calibration report schema.")
+          if report.get("allStepsPassed") is not True:
+              fail("All three calibration stages must be PASS.")
+          if report.get("differsFromOfficial") is not True:
+              fail("The submitted calibration must differ from the official parser.")
+          if int(report.get("calibrationItemId", 0)) != 16001 or int(report.get("calibrationQuantity", 0)) != 100:
+              fail("The guided Storage/Market validation item must be Black Stone x100.")
+          if int(report.get("mobSampleCount", 0)) < 5:
+              fail("At least five validated mob-loot samples are required.")
+          if float(report.get("mobConfidence", 0)) < 0.70:
+              fail("Mob-loot confidence is below the accepted threshold.")
+          if int(report.get("storageSampleCount", 0)) < 1 or float(report.get("storageConfidence", 0)) < 0.45:
+              fail("Storage calibration confidence is below the accepted threshold.")
+          if int(report.get("marketSampleCount", 0)) < 1 or float(report.get("marketConfidence", 0)) < 0.45:
+              fail("Market calibration confidence is below the accepted threshold.")
+
+          manifest_path = Path("parser/manifest.json")
+          official_path = Path("parser/eu-current.json")
+          official_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          official = json.loads(official_path.read_text(encoding="utf-8"))
+
+          base_version = str(report.get("baseOfficialVersion", "")).strip()
+          latest_official = str(official_manifest.get("latestProfileVersion", "")).strip()
+          if base_version != latest_official:
+              fail(f"The official parser changed while calibration was being submitted ({base_version} -> {latest_official}). Re-run the final comparison and submit again if it still differs.")
+
+          profile = report.get("profile")
+          if not isinstance(profile, dict):
+              fail("Candidate parser profile is missing.")
+
+          def norm_hex(value):
+              compact = re.sub(r"[^0-9A-Fa-f]", "", str(value or ""))
+              if not compact or len(compact) % 2:
+                  return ""
+              return " ".join(compact[i:i+2].upper() for i in range(0, len(compact), 2))
+
+          signature = norm_hex(profile.get("signature"))
+          sig_bytes = signature.split() if signature else []
+          if not 2 <= len(sig_bytes) <= 8:
+              fail("Loot signature length is outside the accepted range.")
+
+          try:
+              server_port = int(profile.get("serverPort", 0))
+              sig_offset = int(profile.get("signatureOffset", -1))
+              item_offset = int(profile.get("itemIdOffset", -1))
+              qty_offset = int(profile.get("quantityOffset", -1))
+              min_len = int(profile.get("minimumLength", 0))
+              packet_len_offset = int(profile.get("packetLengthOffset", -1))
+              packet_len_bytes = int(profile.get("packetLengthBytes", 0))
+              max_packet_len = int(profile.get("maximumPacketLength", 0))
+          except Exception:
+              fail("Parser framing contains invalid numeric values.")
+
+          if not (1 <= server_port <= 65535):
+              fail("Server port is invalid.")
+          if not (0 <= sig_offset <= 256 and 0 <= item_offset <= 512 and 0 <= qty_offset <= 512):
+              fail("Parser offsets are outside the accepted range.")
+          if not (0 <= packet_len_offset <= 32 and 1 <= packet_len_bytes <= 4):
+              fail("Packet-length framing is invalid.")
+          required = max(sig_offset + len(sig_bytes), item_offset + 4, qty_offset + 8, packet_len_offset + packet_len_bytes)
+          if min_len < required or max_packet_len < min_len or max_packet_len > 10_000_000:
+              fail("Packet length bounds are invalid.")
+
+          try:
+              max_item_id = int(profile.get("maxReasonableItemId", 0))
+              max_quantity = int(profile.get("maxReasonableQuantity", 0))
+              suppress_lookback = int(profile.get("suppressLookbackBytes", -1))
+              suppress_timeout = int(profile.get("suppressStateTimeoutMilliseconds", -1))
+          except Exception:
+              fail("Parser validation limits contain invalid values.")
+          if not (1 <= max_item_id <= 50_000_000):
+              fail("maxReasonableItemId is outside the accepted range.")
+          if not (1 <= max_quantity <= 1_000_000_000_000):
+              fail("maxReasonableQuantity is outside the accepted range.")
+          if not (0 <= suppress_lookback <= 4096 and 0 <= suppress_timeout <= 10000):
+              fail("Transfer suppression bounds are invalid.")
+
+          storage_marker = norm_hex(report.get("storageMarker"))
+          market_marker = norm_hex(report.get("marketMarker"))
+          def marker_ok(marker):
+              parts = marker.split()
+              return (len(parts) == 6 and parts[:3] == ["06", "00", "00"]) or \
+                     (len(parts) == 5 and parts[:3] == ["28", "00", "00"])
+          if not marker_ok(storage_marker):
+              fail("Storage marker shape is invalid.")
+          if not marker_ok(market_marker):
+              fail("Market marker shape is invalid.")
+
+          suppress = []
+          for value in profile.get("suppressIfPrecededBy", []) or []:
+              normalized = norm_hex(value)
+              if not normalized or not marker_ok(normalized):
+                  fail("Candidate profile contains an invalid transfer suppression marker.")
+              if normalized not in suppress:
+                  suppress.append(normalized)
+          for marker in (storage_marker, market_marker):
+              if marker not in suppress:
+                  suppress.append(marker)
+          profile["suppressIfPrecededBy"] = suppress
+          profile["signature"] = signature
+          profile["schemaVersion"] = 1
+
+          # Keep the parser candidate as data only; the workflow owns its public version.
+          now = datetime.now(timezone.utc)
+          candidate_version = f"COMMUNITY-{now:%Y.%m.%d}-I{issue_number}"
+          profile["profileVersion"] = candidate_version
+
+          def structural(obj):
+              x = dict(obj)
+              x.pop("profileVersion", None)
+              x["signature"] = norm_hex(x.get("signature"))
+              x["suppressIfPrecededBy"] = sorted(set(norm_hex(v) for v in (x.get("suppressIfPrecededBy") or []) if norm_hex(v)))
+              return x
+
+          if structural(profile) == structural(official):
+              fail("The calibrated profile now matches the current official parser, so no community candidate is needed.")
+
+          existing_manifest_path = Path("parser/community-manifest.json")
+          existing_profile_path = Path("parser/community-current.json")
+          if existing_manifest_path.exists() and existing_profile_path.exists():
+              try:
+                  existing_manifest = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
+                  existing_profile = json.loads(existing_profile_path.read_text(encoding="utf-8"))
+                  if existing_manifest.get("baseOfficialVersion") == latest_official and structural(existing_profile) == structural(profile):
+                      fail("An identical community parser candidate is already published.")
+              except Exception:
+                  pass
+
+          profile_bytes = (json.dumps(profile, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+          existing_profile_path.write_bytes(profile_bytes)
+          profile_sha = hashlib.sha256(profile_bytes).hexdigest()
+
+          community_manifest = {
+              "schemaVersion": 1,
+              "candidateId": str(issue_number),
+              "candidateVersion": candidate_version,
+              "baseOfficialVersion": latest_official,
+              "profileUrl": "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/community-current.json",
+              "profileSha256": profile_sha,
+              "createdAtUtc": now.isoformat().replace("+00:00", "Z"),
+              "sourceIssueUrl": issue_url,
+              "notes": "Automatically published from a 3/3 PASS Manual Calibration. Community candidates are optional and remain superseded by any later official parser update."
+          }
+          existing_manifest_path.write_text(json.dumps(community_manifest, indent=2) + "\n", encoding="utf-8")
+
+          finish(
+              f"✅ Calibration validated and published as **{candidate_version}**. "
+              f"BDO Loot Tracker clients will detect it automatically as a community parser candidate while the official base remains **{latest_official}**.",
+              True)
+          PY
+
+      - name: Commit community candidate
+        if: steps.validate.outputs.publish == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add parser/community-current.json parser/community-manifest.json
+          git commit -m "Publish community parser candidate from calibration #${{ github.event.issue.number }}"
+          git push origin main
+
+      - name: Comment and close calibration issue
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f community-result.txt ]; then
+            gh issue comment "${{ github.event.issue.number }}" --body-file community-result.txt
+          else
+            gh issue comment "${{ github.event.issue.number }}" --body "❌ Calibration workflow stopped before a result could be generated."
+          fi
+          gh issue close "${{ github.event.issue.number }}"

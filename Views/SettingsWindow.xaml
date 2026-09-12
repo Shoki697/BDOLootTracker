@@ -254,22 +254,18 @@
                                        Margin="0,8,0,0" />
 
                             <WrapPanel Margin="0,12,0,0">
-                                <Button x:Name="ParserDiagnosticsButton"
-                                        Content="Diagnostics"
+                                <Button x:Name="ParserManualCalibrationButton"
+                                        Content="Manual Calibration"
                                         Margin="0,0,8,8"
-                                        Click="ParserDiagnostics_Click" />
-                                <Button x:Name="ParserCheckUpdateButton"
-                                        Content="Check for parser update"
-                                        Margin="0,0,8,8"
-                                        Click="ParserCheckUpdate_Click" />
-                                <Button x:Name="ParserAutoRepairButton"
-                                        Content="Auto Repair"
-                                        Margin="0,0,0,8"
                                         Background="#1266A8"
-                                        Click="ParserAutoRepair_Click" />
+                                        Click="ParserManualCalibration_Click" />
+                                <Button x:Name="ParserCheckUpdateButton"
+                                        Content="Check for Parser Update"
+                                        Margin="0,0,0,8"
+                                        Click="ParserCheckUpdate_Click" />
                             </WrapPanel>
 
-                            <TextBlock Text="Parser checks do not run when the application simply starts. Remote checks happen only when a session is started or when you use the buttons above."
+                            <TextBlock Text="The tracker checks official and community parser manifests in the background and shows a non-intrusive notification when a newer parser is available. Manual Calibration stays local unless all three stages pass, the result differs from the official parser, and you explicitly choose Submit Calibration."
                                        Foreground="{StaticResource Muted}"
                                        FontSize="10"
                                        TextWrapping="Wrap"

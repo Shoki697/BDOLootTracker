@@ -534,8 +534,8 @@ public partial class SettingsWindow : Window
                 $"Signature: {profile.Signature} • Item offset: {profile.ItemIdOffset} • Quantity offset: {profile.QuantityOffset} • " +
                 $"Transfer lookback: {profile.SuppressLookbackBytes} B • Suppress markers: {profile.SuppressIfPrecededBy?.Count ?? 0}. " +
                 (string.IsNullOrWhiteSpace(sampleVersion)
-                    ? "No cached packet sample. Remote status has not been checked."
-                    : $"Cached packet sample: {sampleVersion}. Remote status has not been checked.");
+                    ? "No cached packet sample."
+                    : $"Cached packet sample: {sampleVersion}.");
         }
         catch (Exception ex)
         {
@@ -546,23 +546,50 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private async void ParserDiagnostics_Click(object sender, RoutedEventArgs e)
+    private void ParserManualCalibration_Click(object sender, RoutedEventArgs e)
     {
-        SetParserButtonsEnabled(false);
-        ParserStatusText.Text = "Running diagnostics...";
-        ParserStatusText.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
-        ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+        if (_captureService?.IsRunning == true)
+        {
+            AppDialog.Show(
+                "Stop the current tracking session before running Manual Calibration.",
+                "Manual Calibration",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
 
-        try
+        if (AdapterCombo.SelectedItem is not NetworkAdapterOption adapter)
         {
-            RefreshNpcapStatus();
-            ParserDiagnosticsResult result = await _parserProfileService.RunDiagnosticsAsync();
-            ApplyParserDiagnosticsResult(result, "Diagnostics");
+            AppDialog.Show(
+                "Select a network adapter first.",
+                "Manual Calibration",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
         }
-        finally
+
+        string databasePath = DatabasePathBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(databasePath))
         {
-            SetParserButtonsEnabled(true);
+            AppDialog.Show(
+                "Set the database path first. The Mob Loot calibration uses known Garmoth item IDs to validate the detected packet layout.",
+                "Manual Calibration",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
         }
+
+        var window = new ParserCalibrationWindow(
+            adapter.Name,
+            databasePath,
+            ExitLagModeCheckBox.IsChecked == true,
+            _parserProfileService)
+        {
+            Owner = this
+        };
+
+        window.ShowDialog();
+        RefreshParserStatusLocal();
     }
 
     private async void ParserCheckUpdate_Click(object sender, RoutedEventArgs e)
@@ -574,30 +601,48 @@ public partial class SettingsWindow : Window
 
         try
         {
-            ParserDiagnosticsResult result = await _parserProfileService.EnsureLatestProfileAsync();
-            ApplyParserDiagnosticsResult(result, "Parser update");
-        }
-        finally
-        {
-            SetParserButtonsEnabled(true);
-        }
-    }
+            ParserDiagnosticsResult check = await _parserProfileService.CheckForUpdateAsync();
+            ApplyParserDiagnosticsResult(check, "Parser update");
 
-    private async void ParserAutoRepair_Click(object sender, RoutedEventArgs e)
-    {
-        SetParserButtonsEnabled(false);
-        ParserStatusText.Text = "Running Auto Repair...";
-        ParserStatusText.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
-        ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(251, 191, 36));
+            if (!check.Success)
+            {
+                AppDialog.Show(
+                    check.Message,
+                    "Parser Update",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
 
-        try
-        {
-            ParserDiagnosticsResult result = await _parserProfileService.AutoRepairAsync();
-            ApplyParserDiagnosticsResult(result, "Auto Repair");
+            if (!check.RemoteProfileAvailable)
+            {
+                AppDialog.Show(
+                    "The active parser profile is current.",
+                    "Parser Update",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            bool community = string.Equals(check.RemoteProfileSource, "Community", StringComparison.OrdinalIgnoreCase);
+            string sourceLabel = community ? "community calibration" : "GitHub official parser";
+            MessageBoxResult install = AppDialog.Show(
+                $"Parser update {check.RemoteProfileVersion} is available from the {sourceLabel}.\n\nInstall it now?",
+                community ? "Community Parser Available" : "Parser Update Available",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (install != MessageBoxResult.Yes)
+                return;
+
+            ParserDiagnosticsResult result = community
+                ? await _parserProfileService.InstallCommunityProfileAsync()
+                : await _parserProfileService.EnsureLatestProfileAsync();
+            ApplyParserDiagnosticsResult(result, community ? "Community parser" : "Parser update");
 
             AppDialog.Show(
                 result.Message + "\n\nThe active parser file is used the next time packet capture starts.",
-                "Loot Parser Auto Repair",
+                "Parser Update",
                 MessageBoxButton.OK,
                 result.Success ? MessageBoxImage.Information : MessageBoxImage.Warning);
         }
@@ -615,7 +660,9 @@ public partial class SettingsWindow : Window
         ParserStatusText.Text = result.ProfileUpdated
             ? $"Updated • {result.ActiveProfile.ProfileVersion}"
             : warning
-                ? $"Update available • {result.RemoteProfileVersion}"
+                ? string.Equals(result.RemoteProfileSource, "Community", StringComparison.OrdinalIgnoreCase)
+                    ? $"Community candidate • {result.RemoteProfileVersion}"
+                    : $"Update available • {result.RemoteProfileVersion}"
                 : result.Success
                     ? $"Ready • {result.ActiveProfile.ProfileVersion}"
                     : $"{operation} could not complete";
@@ -645,9 +692,8 @@ public partial class SettingsWindow : Window
 
     private void SetParserButtonsEnabled(bool enabled)
     {
-        ParserDiagnosticsButton.IsEnabled = enabled;
+        ParserManualCalibrationButton.IsEnabled = enabled;
         ParserCheckUpdateButton.IsEnabled = enabled;
-        ParserAutoRepairButton.IsEnabled = enabled;
     }
 
     private void DatabaseOption_Changed(object sender, SelectionChangedEventArgs e)
@@ -972,9 +1018,8 @@ public partial class SettingsWindow : Window
         RefreshAdaptersButton.IsEnabled = enabled;
         ExitLagModeCheckBox.IsEnabled = enabled;
         RecheckNpcapButton.IsEnabled = enabled;
-        ParserDiagnosticsButton.IsEnabled = enabled;
+        ParserManualCalibrationButton.IsEnabled = enabled;
         ParserCheckUpdateButton.IsEnabled = enabled;
-        ParserAutoRepairButton.IsEnabled = enabled;
         RegionCombo.IsEnabled = enabled;
         LanguageCombo.IsEnabled = enabled;
         DatabasePathBox.IsEnabled = enabled;

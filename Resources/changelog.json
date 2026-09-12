@@ -197,5 +197,46 @@
         "description": "If Garmoth exposes a native Sea Monster spot entry, the tracker augments that entry instead of creating a duplicate fallback spot, preserving the normal Garmoth spot key whenever possible."
       }
     ]
+  },
+  "0.12.7": {
+    "title": "v0.12.7 Manual Parser Calibration & Single Instance",
+    "changes": [
+      {
+        "title": "Guided weekly-patch parser calibration",
+        "description": "Settings → Network now includes Manual Calibration with three guided steps: Mob Loot, Storage and Market. Mob Loot can rediscover the repeated loot signature, server port and item/quantity offsets from known Garmoth items, while Storage and Market learn non-loot transfer markers from guided Black Stone x100 withdrawals."
+      },
+      {
+        "title": "Local calibration with rollback",
+        "description": "A completed calibration is stored as a local parser profile and activated for the next tracking session. The last-known-good parser remains available through Roll Back, and a later approved GitHub parser can replace the temporary local repair."
+      },
+      {
+        "title": "Simplified parser controls and background update detection",
+        "description": "The Network tab now keeps only Manual Calibration and Check for Parser Update. The app also checks the GitHub parser manifest quietly in the background and shows a compact parser-update notification when a newer approved profile is available."
+      },
+      {
+        "title": "Single-instance tray protection",
+        "description": "Only one BDO Loot Tracker instance can run at a time. Launching the shortcut again while the tracker is minimized to the system tray restores and focuses the existing window instead of starting a second tracker process."
+      },
+      {
+        "title": "Current weekly parser bundled",
+        "description": "The built-in parser is updated to EU-2026.09.10.2 with loot signature 6F 0D 00, item offset 29, quantity offset 33, and the current Storage / Market Maid transfer suppression markers."
+      },
+      {
+        "title": "Official parser match check",
+        "description": "After Mob Loot, Storage and Market all pass, Manual Calibration downloads the current official GitHub parser and compares the complete calibrated profile. A green match state confirms that no parser change or submission is required; any structural difference is shown clearly."
+      },
+      {
+        "title": "Validated community calibration submission",
+        "description": "Submit Calibration is enabled only after all three guided calibration steps pass and the result differs from the latest official parser. The official parser is checked again immediately before submission to avoid duplicate reports."
+      },
+      {
+        "title": "Automatic community parser distribution",
+        "description": "A validated calibration can open a pre-filled GitHub calibration issue. A repository workflow validates the report and publishes a community parser candidate automatically. Other tracker clients discover community candidates in the background and can install them without waiting for a full application release."
+      },
+      {
+        "title": "Official parser always supersedes community candidates",
+        "description": "Community parsers are tied to the exact official parser version they were calibrated against. Any later official parser invalidates the temporary community candidate automatically, while last-known-good rollback remains available."
+      }
+    ]
   }
 }

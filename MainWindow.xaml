@@ -500,6 +500,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <TextBlock Text="{Binding StatusText}"
@@ -508,8 +509,19 @@
                        VerticalAlignment="Center"
                        Margin="0,0,10,0" />
 
-            <Button x:Name="UpdateNowButton"
+            <Button x:Name="ParserUpdateNowButton"
                     Grid.Column="1"
+                    Content="{Binding ParserUpdateBannerText}"
+                    Visibility="{Binding ParserUpdateBannerVisibility}"
+                    Padding="10,5"
+                    Margin="0,0,8,0"
+                    Background="#174E73"
+                    FontSize="11"
+                    FontWeight="SemiBold"
+                    Click="ParserUpdateNow_Click" />
+
+            <Button x:Name="UpdateNowButton"
+                    Grid.Column="2"
                     Content="{Binding UpdateBannerText}"
                     Visibility="{Binding UpdateBannerVisibility}"
                     Padding="10,5"
@@ -519,7 +531,7 @@
                     FontWeight="SemiBold"
                     Click="UpdateNow_Click" />
 
-            <StackPanel Grid.Column="2"
+            <StackPanel Grid.Column="3"
                         Orientation="Horizontal">
                 <Ellipse Width="9"
                          Height="9"

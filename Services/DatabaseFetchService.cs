@@ -19,7 +19,7 @@ public sealed class DatabaseFetchService : IDisposable
         };
 
         _httpClient.DefaultRequestHeaders.UserAgent.Add(
-            new ProductInfoHeaderValue("BDOLootTracker", "0.12.6"));
+            new ProductInfoHeaderValue("BDOLootTracker", "0.12.7"));
 
         _catalogApi = new ItemCatalogApiService(_httpClient);
         _marketApi = new MarketApiService(_httpClient);

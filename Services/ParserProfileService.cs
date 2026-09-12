@@ -12,10 +12,15 @@ public sealed class ParserProfileService : IDisposable
     public const string DefaultManifestUrl =
         "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/manifest.json";
 
+    public const string CommunityManifestUrl =
+        "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/community-manifest.json";
+
     private readonly HttpClient _httpClient;
     private readonly string _folder;
     private readonly string _activeProfilePath;
     private readonly string _lastKnownGoodPath;
+    private readonly string _localCalibrationPath;
+    private readonly string _communityBaseVersionPath;
     private readonly string _samplePath;
     private readonly string _sampleVersionPath;
 
@@ -35,6 +40,8 @@ public sealed class ParserProfileService : IDisposable
         Directory.CreateDirectory(_folder);
         _activeProfilePath = Path.Combine(_folder, "active-profile.json");
         _lastKnownGoodPath = Path.Combine(_folder, "last-known-good.json");
+        _localCalibrationPath = Path.Combine(_folder, "local-calibrated.json");
+        _communityBaseVersionPath = Path.Combine(_folder, "community-base-version.txt");
         _samplePath = Path.Combine(_folder, "latest-sample.pcapng");
         _sampleVersionPath = Path.Combine(_folder, "sample-version.txt");
     }
@@ -51,7 +58,7 @@ public sealed class ParserProfileService : IDisposable
         // A newer application release may contain a parser hotfix that is newer
         // than a profile cached by an older install. Prefer that built-in profile
         // even without any network access.
-        if (local == null || CompareProfileVersions(embedded.ProfileVersion, local.ProfileVersion) > 0)
+        if (local == null || ShouldPreferOfficialProfile(embedded.ProfileVersion, local.ProfileVersion))
         {
             source = "Built-in fallback";
             return embedded;
@@ -79,9 +86,7 @@ public sealed class ParserProfileService : IDisposable
         try
         {
             ParserManifest manifest = await DownloadManifestAsync(cancellationToken);
-            bool different = CompareProfileVersions(
-                manifest.LatestProfileVersion,
-                active.ProfileVersion) > 0;
+            bool different = ShouldInstallOfficialOverActive(manifest.LatestProfileVersion, active);
 
             bool sampleAvailable = IsNewSample(manifest);
             if (!different)
@@ -101,6 +106,7 @@ public sealed class ParserProfileService : IDisposable
             ParserProfile remote = await DownloadAndValidateProfileAsync(manifest, cancellationToken);
             SaveProfile(remote, _activeProfilePath);
             SaveProfile(remote, _lastKnownGoodPath);
+            ClearCommunityBaseVersion();
 
             return new ParserDiagnosticsResult(
                 true,
@@ -129,6 +135,184 @@ public sealed class ParserProfileService : IDisposable
     }
 
     /// <summary>
+    /// Lightweight remote manifest check used by the Network button and the
+    /// background parser-update detector. It never changes the active profile.
+    /// </summary>
+    public async Task<ParserDiagnosticsResult> CheckForUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        ParserProfile active = LoadActiveProfile(out string source);
+
+        try
+        {
+            ParserManifest manifest = await DownloadManifestAsync(cancellationToken);
+            bool officialDifferent = ShouldInstallOfficialOverActive(manifest.LatestProfileVersion, active);
+
+            if (officialDifferent)
+            {
+                return new ParserDiagnosticsResult(
+                    true,
+                    active,
+                    source,
+                    manifest.LatestProfileVersion,
+                    true,
+                    false,
+                    manifest.SampleVersion,
+                    IsNewSample(manifest),
+                    $"A newer official parser profile is available: {manifest.LatestProfileVersion}.")
+                {
+                    RemoteProfileSource = "Official"
+                };
+            }
+
+            CommunityParserManifest? communityManifest = await TryDownloadCommunityManifestAsync(cancellationToken);
+            if (communityManifest != null &&
+                !string.IsNullOrWhiteSpace(communityManifest.CandidateVersion) &&
+                string.Equals(communityManifest.BaseOfficialVersion, manifest.LatestProfileVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                ParserProfile candidate = await DownloadAndValidateCommunityProfileAsync(communityManifest, cancellationToken);
+                if (!AreProfilesEquivalent(candidate, active))
+                {
+                    return new ParserDiagnosticsResult(
+                        true,
+                        active,
+                        source,
+                        communityManifest.CandidateVersion,
+                        true,
+                        false,
+                        manifest.SampleVersion,
+                        IsNewSample(manifest),
+                        $"A community parser candidate is available: {communityManifest.CandidateVersion}.")
+                    {
+                        RemoteProfileSource = "Community"
+                    };
+                }
+            }
+
+            return new ParserDiagnosticsResult(
+                true,
+                active,
+                source,
+                manifest.LatestProfileVersion,
+                false,
+                false,
+                manifest.SampleVersion,
+                IsNewSample(manifest),
+                "Parser profile is current.")
+            {
+                RemoteProfileSource = "Official"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ParserDiagnosticsResult(
+                false,
+                active,
+                source,
+                string.Empty,
+                false,
+                false,
+                string.Empty,
+                false,
+                $"Remote parser check unavailable: {ex.Message}");
+        }
+    }
+
+    public async Task<ParserDiagnosticsResult> InstallCommunityProfileAsync(CancellationToken cancellationToken = default)
+    {
+        ParserProfile before = LoadActiveProfile(out string source);
+
+        try
+        {
+            ParserManifest officialManifest = await DownloadManifestAsync(cancellationToken);
+            CommunityParserManifest? communityManifest = await TryDownloadCommunityManifestAsync(cancellationToken);
+            if (communityManifest == null ||
+                string.IsNullOrWhiteSpace(communityManifest.CandidateVersion) ||
+                !string.Equals(communityManifest.BaseOfficialVersion, officialManifest.LatestProfileVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                return new ParserDiagnosticsResult(
+                    true, before, source, officialManifest.LatestProfileVersion, false, false,
+                    officialManifest.SampleVersion, IsNewSample(officialManifest),
+                    "No current community parser candidate is available.");
+            }
+
+            // An official update always wins. Community candidates are only used
+            // while they are based on the exact current official parser version.
+            if (ShouldInstallOfficialOverActive(officialManifest.LatestProfileVersion, before))
+            {
+                return await EnsureLatestProfileAsync(cancellationToken);
+            }
+
+            ParserProfile candidate = await DownloadAndValidateCommunityProfileAsync(communityManifest, cancellationToken);
+            if (AreProfilesEquivalent(candidate, before))
+            {
+                return new ParserDiagnosticsResult(
+                    true, before, source, communityManifest.CandidateVersion, false, false,
+                    officialManifest.SampleVersion, IsNewSample(officialManifest),
+                    "The community parser candidate is already active.")
+                {
+                    RemoteProfileSource = "Community"
+                };
+            }
+
+            SaveProfile(before, _lastKnownGoodPath);
+            SaveProfile(candidate, _activeProfilePath);
+            SaveCommunityBaseVersion(communityManifest.BaseOfficialVersion);
+
+            return new ParserDiagnosticsResult(
+                true, candidate, "Community parser", communityManifest.CandidateVersion, true, true,
+                officialManifest.SampleVersion, IsNewSample(officialManifest),
+                $"Community parser {communityManifest.CandidateVersion} installed. Roll Back remains available if it behaves unexpectedly.")
+            {
+                RemoteProfileSource = "Community"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ParserDiagnosticsResult(
+                false, before, source, string.Empty, false, false, string.Empty, false,
+                $"Community parser install failed: {ex.Message}")
+            {
+                RemoteProfileSource = "Community"
+            };
+        }
+    }
+
+    public async Task<OfficialParserSnapshot> GetLatestOfficialSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        ParserManifest manifest = await DownloadManifestAsync(cancellationToken);
+        ParserProfile profile = await DownloadAndValidateProfileAsync(manifest, cancellationToken);
+        return new OfficialParserSnapshot(manifest, profile);
+    }
+
+    public async Task<ParserCalibrationComparisonResult> CompareCalibrationWithOfficialAsync(
+        ParserProfile calibrated,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            OfficialParserSnapshot snapshot = await GetLatestOfficialSnapshotAsync(cancellationToken);
+            bool matches = AreProfilesEquivalent(calibrated, snapshot.Profile);
+            return new ParserCalibrationComparisonResult(
+                true,
+                matches,
+                snapshot.Manifest.LatestProfileVersion,
+                snapshot.Profile,
+                matches
+                    ? $"Matches the current official parser ({snapshot.Manifest.LatestProfileVersion})."
+                    : $"Calibration differs from the current official parser ({snapshot.Manifest.LatestProfileVersion}).");
+        }
+        catch (Exception ex)
+        {
+            return new ParserCalibrationComparisonResult(
+                false,
+                false,
+                string.Empty,
+                null,
+                $"Could not compare with the official parser: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Explicit Diagnostics action. It checks remote metadata but does not
     /// modify the active profile.
     /// </summary>
@@ -139,9 +323,7 @@ public sealed class ParserProfileService : IDisposable
         try
         {
             ParserManifest manifest = await DownloadManifestAsync(cancellationToken);
-            bool different = CompareProfileVersions(
-                manifest.LatestProfileVersion,
-                active.ProfileVersion) > 0;
+            bool different = ShouldInstallOfficialOverActive(manifest.LatestProfileVersion, active);
 
             int cachedMatches = CountValidCandidatesInCachedSample(active);
             string sampleValidation = cachedMatches > 0
@@ -194,6 +376,7 @@ public sealed class ParserProfileService : IDisposable
 
             SaveProfile(remote, _activeProfilePath);
             SaveProfile(remote, _lastKnownGoodPath);
+            ClearCommunityBaseVersion();
 
             bool sampleAvailable = IsNewSample(manifest);
             if (sampleAvailable)
@@ -249,6 +432,38 @@ public sealed class ParserProfileService : IDisposable
                 $"Auto Repair failed: {ex.Message}");
         }
     }
+
+    public ParserProfile ActivateLocalCalibrationProfile(ParserProfile profile)
+    {
+        ParserProfile activeBefore = LoadActiveProfile();
+        ParserProfile local = CloneProfile(profile);
+        local.ProfileVersion = BuildLocalCalibrationVersion(activeBefore.ProfileVersion);
+
+        ValidateProfile(local);
+
+        // Manual Calibration is intentionally reversible even when the user has
+        // never downloaded a remote parser before. Snapshot the profile that was
+        // active immediately before the local repair, then activate the new one.
+        SaveProfile(activeBefore, _lastKnownGoodPath);
+        SaveProfile(local, _localCalibrationPath);
+        SaveProfile(local, _activeProfilePath);
+        ClearCommunityBaseVersion();
+        return local;
+    }
+
+    public ParserProfile? RollbackToLastKnownGood()
+    {
+        ParserProfile? fallback = LoadLastKnownGood();
+        if (fallback == null)
+            return null;
+
+        SaveProfile(fallback, _activeProfilePath);
+        ClearCommunityBaseVersion();
+        return fallback;
+    }
+
+    public string GetLocalCalibrationPath()
+        => _localCalibrationPath;
 
     public string GetLocalSampleVersion()
     {
@@ -345,6 +560,100 @@ public sealed class ParserProfileService : IDisposable
         catch
         {
             // Health bookkeeping must never interrupt tracking.
+        }
+    }
+
+    private async Task<CommunityParserManifest?> TryDownloadCommunityManifestAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            string json = await _httpClient.GetStringAsync(CommunityManifestUrl, cancellationToken);
+            CommunityParserManifest? manifest = JsonSerializer.Deserialize<CommunityParserManifest>(json, JsonOptions());
+            if (manifest == null || manifest.SchemaVersion != 1 || string.IsNullOrWhiteSpace(manifest.CandidateVersion))
+                return null;
+
+            if (string.IsNullOrWhiteSpace(manifest.BaseOfficialVersion) ||
+                string.IsNullOrWhiteSpace(manifest.ProfileUrl) ||
+                string.IsNullOrWhiteSpace(manifest.ProfileSha256))
+                return null;
+
+            return manifest;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<ParserProfile> DownloadAndValidateCommunityProfileAsync(
+        CommunityParserManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        byte[] bytes = await _httpClient.GetByteArrayAsync(manifest.ProfileUrl, cancellationToken);
+        VerifySha256(bytes, manifest.ProfileSha256, "community parser profile");
+
+        ParserProfile? profile = JsonSerializer.Deserialize<ParserProfile>(bytes, JsonOptions());
+        if (profile == null)
+            throw new InvalidDataException("Community parser profile could not be decoded.");
+
+        ValidateProfile(profile);
+        if (!string.Equals(profile.ProfileVersion, manifest.CandidateVersion, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Community manifest/profile version mismatch.");
+
+        return profile;
+    }
+
+    public static bool AreProfilesEquivalent(ParserProfile left, ParserProfile right)
+    {
+        if (left.SchemaVersion != right.SchemaVersion ||
+            !string.Equals(left.Region?.Trim(), right.Region?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+            left.ServerPort != right.ServerPort ||
+            !string.Equals(NormalizeHexForComparison(left.Signature), NormalizeHexForComparison(right.Signature), StringComparison.OrdinalIgnoreCase) ||
+            left.SignatureOffset != right.SignatureOffset ||
+            left.PacketLengthOffset != right.PacketLengthOffset ||
+            left.PacketLengthBytes != right.PacketLengthBytes ||
+            left.MaximumPacketLength != right.MaximumPacketLength ||
+            left.ItemIdOffset != right.ItemIdOffset ||
+            left.QuantityOffset != right.QuantityOffset ||
+            left.MinimumLength != right.MinimumLength ||
+            left.MaxReasonableItemId != right.MaxReasonableItemId ||
+            left.MaxReasonableQuantity != right.MaxReasonableQuantity ||
+            left.SuppressLookbackBytes != right.SuppressLookbackBytes ||
+            left.SuppressStateTimeoutMilliseconds != right.SuppressStateTimeoutMilliseconds)
+        {
+            return false;
+        }
+
+        string[] a = (left.SuppressIfPrecededBy ?? new List<string>())
+            .Select(NormalizeHexForComparison)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        string[] b = (right.SuppressIfPrecededBy ?? new List<string>())
+            .Select(NormalizeHexForComparison)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeHexForComparison(string value)
+    {
+        try
+        {
+            return Convert.ToHexString(ParseHex(value));
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 
@@ -525,40 +834,144 @@ public sealed class ParserProfileService : IDisposable
             _ = ParseHex(prefix);
     }
 
-    private static int CompareProfileVersions(string left, string right)
+    private static ParserProfile CloneProfile(ParserProfile source)
+        => new()
+        {
+            SchemaVersion = source.SchemaVersion,
+            ProfileVersion = source.ProfileVersion,
+            Region = source.Region,
+            ServerPort = source.ServerPort,
+            Signature = source.Signature,
+            SignatureOffset = source.SignatureOffset,
+            PacketLengthOffset = source.PacketLengthOffset,
+            PacketLengthBytes = source.PacketLengthBytes,
+            MaximumPacketLength = source.MaximumPacketLength,
+            ItemIdOffset = source.ItemIdOffset,
+            QuantityOffset = source.QuantityOffset,
+            MinimumLength = source.MinimumLength,
+            MaxReasonableItemId = source.MaxReasonableItemId,
+            MaxReasonableQuantity = source.MaxReasonableQuantity,
+            SuppressLookbackBytes = source.SuppressLookbackBytes,
+            SuppressStateTimeoutMilliseconds = source.SuppressStateTimeoutMilliseconds,
+            SuppressIfPrecededBy = new List<string>(source.SuppressIfPrecededBy ?? new List<string>())
+        };
+
+    private static string BuildLocalCalibrationVersion(string activeVersion)
+    {
+        DateTime now = DateTime.Now;
+        int revision = 1;
+        int[] activeNumbers = ExtractVersionNumbers(activeVersion);
+
+        if (activeNumbers.Length >= 4 &&
+            activeNumbers[0] == now.Year &&
+            activeNumbers[1] == now.Month &&
+            activeNumbers[2] == now.Day)
+        {
+            revision = Math.Max(1, activeNumbers[3] + 1);
+        }
+
+        return $"LOCAL-{now:yyyy.MM.dd}.{revision}";
+    }
+
+    private bool ShouldInstallOfficialOverActive(string officialVersion, ParserProfile active)
+    {
+        if (active.ProfileVersion.StartsWith("COMMUNITY-", StringComparison.OrdinalIgnoreCase))
+        {
+            string baseVersion = GetCommunityBaseVersion();
+            if (!string.IsNullOrWhiteSpace(baseVersion))
+                return !string.Equals(baseVersion, officialVersion, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return ShouldPreferOfficialProfile(officialVersion, active.ProfileVersion);
+    }
+
+    private string GetCommunityBaseVersion()
+    {
+        try
+        {
+            return File.Exists(_communityBaseVersionPath)
+                ? File.ReadAllText(_communityBaseVersionPath).Trim()
+                : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private void SaveCommunityBaseVersion(string version)
+    {
+        try
+        {
+            File.WriteAllText(_communityBaseVersionPath, version?.Trim() ?? string.Empty);
+        }
+        catch
+        {
+            // Sidecar metadata is only used to decide when an official parser
+            // should supersede a temporary community candidate.
+        }
+    }
+
+    private void ClearCommunityBaseVersion()
+    {
+        try
+        {
+            if (File.Exists(_communityBaseVersionPath))
+                File.Delete(_communityBaseVersionPath);
+        }
+        catch
+        {
+            // Best-effort cleanup only.
+        }
+    }
+
+    private static bool ShouldPreferOfficialProfile(string officialVersion, string activeVersion)
+    {
+        int cmp = CompareProfileVersions(officialVersion, activeVersion, numericOnly: true);
+        if (cmp > 0)
+            return true;
+
+        // A manually calibrated profile deliberately wins over an older GitHub
+        // profile. Once an approved remote profile reaches the same numeric
+        // version, prefer the official one so one user's temporary local repair
+        // does not remain pinned forever.
+        return cmp == 0 && activeVersion.StartsWith("LOCAL-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int[] ExtractVersionNumbers(string value)
+    {
+        var numbers = new List<int>();
+        int current = 0;
+        bool inNumber = false;
+
+        foreach (char c in value ?? string.Empty)
+        {
+            if (char.IsDigit(c))
+            {
+                inNumber = true;
+                current = current > 100_000_000 ? current : current * 10 + (c - '0');
+            }
+            else if (inNumber)
+            {
+                numbers.Add(current);
+                current = 0;
+                inNumber = false;
+            }
+        }
+
+        if (inNumber)
+            numbers.Add(current);
+
+        return numbers.ToArray();
+    }
+
+    private static int CompareProfileVersions(string left, string right, bool numericOnly = false)
     {
         if (string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
             return 0;
 
-        static int[] Numbers(string value)
-        {
-            var numbers = new List<int>();
-            int current = 0;
-            bool inNumber = false;
-
-            foreach (char c in value ?? string.Empty)
-            {
-                if (char.IsDigit(c))
-                {
-                    inNumber = true;
-                    current = current > 100_000_000 ? current : current * 10 + (c - '0');
-                }
-                else if (inNumber)
-                {
-                    numbers.Add(current);
-                    current = 0;
-                    inNumber = false;
-                }
-            }
-
-            if (inNumber)
-                numbers.Add(current);
-
-            return numbers.ToArray();
-        }
-
-        int[] a = Numbers(left);
-        int[] b = Numbers(right);
+        int[] a = ExtractVersionNumbers(left);
+        int[] b = ExtractVersionNumbers(right);
         int count = Math.Max(a.Length, b.Length);
         for (int i = 0; i < count; i++)
         {
@@ -568,6 +981,9 @@ public sealed class ParserProfileService : IDisposable
             if (cmp != 0)
                 return cmp;
         }
+
+        if (numericOnly)
+            return 0;
 
         return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
     }

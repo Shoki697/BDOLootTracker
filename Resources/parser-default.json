@@ -1,24 +1,24 @@
 {
   "schemaVersion": 1,
-  "profileVersion": "EU-2026.09.05.2",
+  "profileVersion": "EU-2026.09.10.2",
   "region": "EU",
   "serverPort": 8889,
-  "signature": "1E 16 01",
+  "signature": "6F 0D 00",
   "signatureOffset": 3,
   "packetLengthOffset": 0,
   "packetLengthBytes": 3,
   "maximumPacketLength": 2000000,
-  "itemIdOffset": 28,
-  "quantityOffset": 32,
-  "minimumLength": 40,
+  "itemIdOffset": 29,
+  "quantityOffset": 33,
+  "minimumLength": 41,
   "maxReasonableItemId": 10000000,
   "maxReasonableQuantity": 10000000000,
   "suppressLookbackBytes": 96,
   "suppressStateTimeoutMilliseconds": 2000,
   "suppressIfPrecededBy": [
     "06 00 00 E7 12 02",
-    "06 00 00 6C 10 00",
-    "06 00 00 6C 10 02",
+    "06 00 00 3E 10 00",
+    "06 00 00 3E 10 02",
     "28 00 00 BE 16"
   ]
 }

@@ -9,4 +9,7 @@ public sealed record ParserDiagnosticsResult(
     bool ProfileUpdated,
     string RemoteSampleVersion,
     bool NewSampleAvailable,
-    string Message);
+    string Message)
+{
+    public string RemoteProfileSource { get; init; } = "Official";
+}

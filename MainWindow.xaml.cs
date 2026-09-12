@@ -42,6 +42,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -60,6 +63,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private static readonly TimeSpan MarketMaxAge = TimeSpan.FromDays(7);
     private static readonly TimeSpan AutoSaveInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan ParserUpdateCheckInterval = TimeSpan.FromMinutes(5);
     private const double ExpandedMinWidth = 980;
     // Compact mode should end almost exactly at the right edge of the
     // left session cards (440 px + window/content margins).
@@ -78,6 +82,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _autoSaveTimer;
     private readonly DispatcherTimer _updateCheckTimer;
+    private readonly DispatcherTimer _parserUpdateCheckTimer;
     private OverlayWindow? _overlayWindow;
     private Forms.NotifyIcon? _trayIcon;
     private HwndSource? _hwndSource;
@@ -89,6 +94,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isInstallingUpdate;
     private bool _startupUpdatePromptShown;
     private AppUpdateService.AvailableUpdateInfo? _availableUpdate;
+    private bool _isCheckingForParserUpdate;
+    private bool _isInstallingParserUpdate;
+    private string _availableParserVersion = string.Empty;
+    private string _availableParserSource = "Official";
     private ParserProfile _activeParserProfile = new();
     private bool _parserProfileConfirmedThisSession;
     private bool _parserRecoveryPromptShown;
@@ -145,6 +154,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Brush _overlayButtonBorderBrush = new SolidColorBrush(Color.FromRgb(42, 62, 77));
     private string _updateBannerText = string.Empty;
     private Visibility _updateBannerVisibility = Visibility.Collapsed;
+    private string _parserUpdateBannerText = string.Empty;
+    private Visibility _parserUpdateBannerVisibility = Visibility.Collapsed;
     private string _trackerStateText = "STOPPED";
     private Brush _trackerStateForeground = new SolidColorBrush(Color.FromRgb(150, 163, 175));
     private Brush _trackerStateBackground = new SolidColorBrush(Color.FromArgb(42, 91, 104, 116));
@@ -227,6 +238,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public Brush OverlayButtonBorderBrush { get => _overlayButtonBorderBrush; private set => SetField(ref _overlayButtonBorderBrush, value); }
     public string UpdateBannerText { get => _updateBannerText; private set => SetField(ref _updateBannerText, value); }
     public Visibility UpdateBannerVisibility { get => _updateBannerVisibility; private set => SetField(ref _updateBannerVisibility, value); }
+    public string ParserUpdateBannerText { get => _parserUpdateBannerText; private set => SetField(ref _parserUpdateBannerText, value); }
+    public Visibility ParserUpdateBannerVisibility { get => _parserUpdateBannerVisibility; private set => SetField(ref _parserUpdateBannerVisibility, value); }
     public string TrackerStateText { get => _trackerStateText; private set => SetField(ref _trackerStateText, value); }
     public Brush TrackerStateForeground { get => _trackerStateForeground; private set => SetField(ref _trackerStateForeground, value); }
     public Brush TrackerStateBackground { get => _trackerStateBackground; private set => SetField(ref _trackerStateBackground, value); }
@@ -281,7 +294,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SourceInitialized += MainWindow_SourceInitialized;
 
         _settings = _settingsService.Load();
-        // Local-only parser load. No GitHub/parser health check is performed at app startup.
+        // Initial parser load is local-only. A lightweight manifest check is queued after the window loads.
         _activeParserProfile = _parserProfileService.LoadActiveProfile();
         _captureService.ConfigureParser(_activeParserProfile);
         _database = new DatabaseService(_settings.DatabasePath);
@@ -303,6 +316,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _updateCheckTimer = new DispatcherTimer { Interval = UpdateCheckInterval };
         _updateCheckTimer.Tick += async (_, _) => await CheckForUpdateAvailabilityAsync();
 
+        _parserUpdateCheckTimer = new DispatcherTimer { Interval = ParserUpdateCheckInterval };
+        _parserUpdateCheckTimer.Tick += async (_, _) => await CheckForParserUpdateAvailabilityAsync();
+
         Loaded += MainWindow_Loaded;
         ContentRendered += MainWindow_ContentRendered;
         Closing += MainWindow_Closing;
@@ -320,6 +336,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             _updateCheckTimer.Stop();
+            _parserUpdateCheckTimer.Stop();
             StopSession(saveSession: true);
             CloseOverlayWindow();
             _captureService.Dispose();
@@ -339,6 +356,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             await CheckForUpdateAvailabilityAsync(showStartupPopup: true);
             _updateCheckTimer.Start();
+        }));
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(async () =>
+        {
+            await CheckForParserUpdateAvailabilityAsync();
+            _parserUpdateCheckTimer.Start();
         }));
         UpdateGarmothUploadButtonState();
     }
@@ -404,6 +426,110 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             _isCheckingForUpdate = false;
         }
+    }
+
+    private async Task CheckForParserUpdateAvailabilityAsync()
+    {
+        if (_isCheckingForParserUpdate || _isInstallingParserUpdate)
+            return;
+
+        _isCheckingForParserUpdate = true;
+        try
+        {
+            ParserDiagnosticsResult result = await _parserProfileService.CheckForUpdateAsync();
+            if (!result.Success)
+                return;
+
+            if (!result.RemoteProfileAvailable)
+            {
+                ClearParserUpdateBanner();
+                return;
+            }
+
+            _availableParserVersion = result.RemoteProfileVersion;
+            _availableParserSource = string.IsNullOrWhiteSpace(result.RemoteProfileSource)
+                ? "Official"
+                : result.RemoteProfileSource;
+            ParserUpdateBannerText = string.Equals(_availableParserSource, "Community", StringComparison.OrdinalIgnoreCase)
+                ? $"Community parser • {_availableParserVersion}"
+                : $"Parser update • {_availableParserVersion}";
+            ParserUpdateBannerVisibility = Visibility.Visible;
+        }
+        finally
+        {
+            _isCheckingForParserUpdate = false;
+        }
+    }
+
+    private async void ParserUpdateNow_Click(object sender, RoutedEventArgs e)
+    {
+        if (_captureService.IsRunning)
+        {
+            AppDialog.Show(
+                "Stop the current tracking session before installing a parser update.",
+                "Parser Update",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        if (_isInstallingParserUpdate)
+            return;
+
+        if (string.Equals(_availableParserSource, "Community", StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBoxResult installCommunity = AppDialog.Show(
+                $"Community parser {_availableParserVersion} was generated from a successful 3/3 user calibration and validated by the repository workflow.\n\nInstall this candidate? Roll Back remains available.",
+                "Community Parser Available",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (installCommunity != MessageBoxResult.Yes)
+                return;
+        }
+
+        _isInstallingParserUpdate = true;
+        try
+        {
+            ParserUpdateBannerText = "Installing parser update…";
+            ParserDiagnosticsResult result = string.Equals(_availableParserSource, "Community", StringComparison.OrdinalIgnoreCase)
+                ? await _parserProfileService.InstallCommunityProfileAsync()
+                : await _parserProfileService.EnsureLatestProfileAsync();
+            _activeParserProfile = result.ActiveProfile;
+            _captureService.ConfigureParser(_activeParserProfile);
+
+            if (result.Success)
+            {
+                ClearParserUpdateBanner();
+                StatusText = $"Parser ready • {_activeParserProfile.ProfileVersion}";
+            }
+            else
+            {
+                ParserUpdateBannerText = string.IsNullOrWhiteSpace(_availableParserVersion)
+                    ? "Parser update available"
+                    : string.Equals(_availableParserSource, "Community", StringComparison.OrdinalIgnoreCase)
+                        ? $"Community parser • {_availableParserVersion}"
+                        : $"Parser update • {_availableParserVersion}";
+                ParserUpdateBannerVisibility = Visibility.Visible;
+                AppDialog.Show(result.Message, "Parser Update", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Show(ex.Message, "Parser Update", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _isInstallingParserUpdate = false;
+        }
+    }
+
+    private void ClearParserUpdateBanner()
+    {
+        _availableParserVersion = string.Empty;
+        _availableParserSource = "Official";
+        ParserUpdateBannerText = string.Empty;
+        ParserUpdateBannerVisibility = Visibility.Collapsed;
     }
 
     private async void UpdateNow_Click(object sender, RoutedEventArgs e)
@@ -585,13 +711,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
-        // Parser self-checks are intentionally triggered only by START or the
-        // explicit Diagnostics button in Settings. Application startup never
-        // performs this remote check.
+        // START still installs a newer approved parser immediately if one is
+        // available. A lightweight background manifest check also runs while the
+        // app is open so the user can see a parser update before starting.
         StartButton.IsEnabled = false;
         StatusText = "Checking loot parser profile...";
         ParserDiagnosticsResult parserCheck = await _parserProfileService.EnsureLatestProfileAsync();
         _activeParserProfile = parserCheck.ActiveProfile;
+        if (parserCheck.ProfileUpdated || !parserCheck.RemoteProfileAvailable)
+            ClearParserUpdateBanner();
 
         try
         {
@@ -1857,6 +1985,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (_trayIcon != null)
             _trayIcon.Visible = false;
+    }
+
+    internal void RestoreFromExternalLaunch()
+    {
+        RestoreFromTray();
+
+        if (_mainHwnd != IntPtr.Zero)
+            SetForegroundWindow(_mainHwnd);
+
+        // Brief topmost toggle helps Windows surface a tray-hidden window when a
+        // second shortcut launch is what initiated the activation request.
+        bool wasTopmost = Topmost;
+        Topmost = true;
+        Topmost = wasTopmost;
+        Activate();
+        Focus();
     }
 
     private void ExitFromTray()
