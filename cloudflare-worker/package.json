@@ -1,0 +1,13 @@
+{
+  "name": "bdoloottracker-community-parser",
+  "version": "0.12.7",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.36.0"
+  }
+}

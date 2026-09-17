@@ -29,3 +29,6 @@ update-source.json
 Thumbs.db
 .idea/
 .vscode/
+
+cloudflare-worker/node_modules/
+cloudflare-worker/.wrangler/
