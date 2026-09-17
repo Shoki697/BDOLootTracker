@@ -12,9 +12,6 @@ public sealed class ParserProfileService : IDisposable
     public const string DefaultManifestUrl =
         "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/manifest.json";
 
-    public const string CommunityManifestUrl =
-        "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/community-manifest.json";
-
     private readonly HttpClient _httpClient;
     private readonly string _folder;
     private readonly string _activeProfilePath;
@@ -565,9 +562,22 @@ public sealed class ParserProfileService : IDisposable
 
     private async Task<CommunityParserManifest?> TryDownloadCommunityManifestAsync(CancellationToken cancellationToken)
     {
+        if (!CommunityParserEndpoint.TryGetBaseUri(out Uri? baseUri) || baseUri == null)
+            return null;
+
         try
         {
-            string json = await _httpClient.GetStringAsync(CommunityManifestUrl, cancellationToken);
+            Uri endpoint = CommunityParserEndpoint.BuildUri(baseUri, "/community/latest");
+            using HttpResponseMessage response = await _httpClient.GetAsync(endpoint, cancellationToken);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound ||
+                response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            {
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
+            string json = await response.Content.ReadAsStringAsync(cancellationToken);
             CommunityParserManifest? manifest = JsonSerializer.Deserialize<CommunityParserManifest>(json, JsonOptions());
             if (manifest == null || manifest.SchemaVersion != 1 || string.IsNullOrWhiteSpace(manifest.CandidateVersion))
                 return null;
@@ -577,11 +587,17 @@ public sealed class ParserProfileService : IDisposable
                 string.IsNullOrWhiteSpace(manifest.ProfileSha256))
                 return null;
 
+            if (!Uri.TryCreate(manifest.ProfileUrl, UriKind.Absolute, out Uri? profileUri))
+                return null;
+
+            bool secureProfile = string.Equals(profileUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+            bool localProfile = string.Equals(profileUri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(profileUri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(profileUri.Host, "::1", StringComparison.OrdinalIgnoreCase);
+            if (!secureProfile && !localProfile)
+                return null;
+
             return manifest;
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return null;
         }
         catch
         {
@@ -622,11 +638,32 @@ public sealed class ParserProfileService : IDisposable
             left.MinimumLength != right.MinimumLength ||
             left.MaxReasonableItemId != right.MaxReasonableItemId ||
             left.MaxReasonableQuantity != right.MaxReasonableQuantity ||
-            left.SuppressLookbackBytes != right.SuppressLookbackBytes ||
-            left.SuppressStateTimeoutMilliseconds != right.SuppressStateTimeoutMilliseconds)
+            left.GroundLootOnly != right.GroundLootOnly)
         {
             return false;
         }
+
+        string[] leftGround = (left.GroundLootChecks ?? new List<ParserByteCheck>())
+            .Select(x => $"{x.Offset}:{NormalizeHexForComparison(x.Bytes)}")
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        string[] rightGround = (right.GroundLootChecks ?? new List<ParserByteCheck>())
+            .Select(x => $"{x.Offset}:{NormalizeHexForComparison(x.Bytes)}")
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (!leftGround.SequenceEqual(rightGround, StringComparer.OrdinalIgnoreCase))
+            return false;
+
+        // Once both profiles are ground-loot allowlists, Storage/Market suppression
+        // data is legacy compatibility metadata and is intentionally not part of
+        // parser equivalence. Old clients can still consume those markers.
+        if (left.GroundLootOnly && right.GroundLootOnly)
+            return true;
+
+        if (left.SuppressLookbackBytes != right.SuppressLookbackBytes ||
+            left.SuppressStateTimeoutMilliseconds != right.SuppressStateTimeoutMilliseconds)
+            return false;
 
         string[] a = (left.SuppressIfPrecededBy ?? new List<string>())
             .Select(NormalizeHexForComparison)
@@ -827,8 +864,20 @@ public sealed class ParserProfileService : IDisposable
                 profile.PacketLengthOffset + profile.PacketLengthBytes,
                 Math.Max(profile.ItemIdOffset + 4, profile.QuantityOffset + 8)));
 
+        var groundChecks = profile.GroundLootChecks ?? new List<ParserByteCheck>();
+        if (profile.GroundLootOnly && groundChecks.Count < 2)
+            throw new InvalidDataException("Ground-loot-only parser requires at least two fingerprint checks.");
+
+        foreach (ParserByteCheck check in groundChecks)
+        {
+            byte[] bytes = ParseHex(check.Bytes);
+            if (check.Offset < 0 || bytes.Length < 1 || bytes.Length > 16 || check.Offset + bytes.Length > profile.MaximumPacketLength)
+                throw new InvalidDataException("Ground-loot fingerprint contains an invalid byte check.");
+            required = Math.Max(required, check.Offset + bytes.Length);
+        }
+
         if (profile.MinimumLength < required)
-            throw new InvalidDataException("Parser minimum packet length is smaller than its configured fields.");
+            throw new InvalidDataException("Parser minimum packet length is smaller than its configured fields/fingerprint.");
 
         foreach (string prefix in profile.SuppressIfPrecededBy ?? new List<string>())
             _ = ParseHex(prefix);
@@ -851,6 +900,10 @@ public sealed class ParserProfileService : IDisposable
             MinimumLength = source.MinimumLength,
             MaxReasonableItemId = source.MaxReasonableItemId,
             MaxReasonableQuantity = source.MaxReasonableQuantity,
+            GroundLootOnly = source.GroundLootOnly,
+            GroundLootChecks = (source.GroundLootChecks ?? new List<ParserByteCheck>())
+                .Select(x => new ParserByteCheck { Offset = x.Offset, Bytes = x.Bytes })
+                .ToList(),
             SuppressLookbackBytes = source.SuppressLookbackBytes,
             SuppressStateTimeoutMilliseconds = source.SuppressStateTimeoutMilliseconds,
             SuppressIfPrecededBy = new List<string>(source.SuppressIfPrecededBy ?? new List<string>())

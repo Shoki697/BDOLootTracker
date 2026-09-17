@@ -265,11 +265,11 @@
                                         Click="ParserCheckUpdate_Click" />
                             </WrapPanel>
 
-                            <TextBlock Text="The tracker checks official and community parser manifests in the background and shows a non-intrusive notification when a newer parser is available. Manual Calibration stays local unless all three stages pass, the result differs from the official parser, and you explicitly choose Submit Calibration."
+                            <TextBlock Text="Official parser updates come from GitHub. Community parser sharing uses the built-in BDOLootTracker service automatically; no URL, browser, GitHub account or issue configuration is required. Ground Loot calibration stays local unless it passes, differs from the latest official parser, and you choose Submit Calibration."
                                        Foreground="{StaticResource Muted}"
                                        FontSize="10"
                                        TextWrapping="Wrap"
-                                       Margin="0,2,0,0" />
+                                       Margin="0,4,0,0" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

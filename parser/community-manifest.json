@@ -7,5 +7,5 @@
   "profileSha256": "",
   "createdAtUtc": "",
   "sourceIssueUrl": "",
-  "notes": "No community parser candidate is currently published."
+  "notes": "Deprecated in v0.12.7 dev. Community candidates are served by the configured Cloudflare Worker; the desktop client no longer reads this GitHub file."
 }

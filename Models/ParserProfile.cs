@@ -26,6 +26,13 @@ public sealed class ParserProfile
     public uint MaxReasonableItemId { get; set; } = 10_000_000;
     public ulong MaxReasonableQuantity { get; set; } = 10_000_000_000UL;
 
+    // Ground-loot allowlist. When enabled, a candidate inventory-add packet is
+    // accepted only if every configured byte check matches the packet. This
+    // intentionally flips the parser from "accept inventory add, then suppress
+    // known transfers" to "accept only the calibrated ground-loot shape".
+    public bool GroundLootOnly { get; set; }
+    public List<ParserByteCheck> GroundLootChecks { get; set; } = new();
+
     // Optional byte sequences associated with non-loot inventory transfers.
     // SuppressLookbackBytes keeps the legacy byte-window check for backwards
     // compatibility. SuppressStateTimeoutMilliseconds also lets a detected
@@ -35,4 +42,10 @@ public sealed class ParserProfile
     public int SuppressLookbackBytes { get; set; }
     public int SuppressStateTimeoutMilliseconds { get; set; }
     public List<string> SuppressIfPrecededBy { get; set; } = new();
+}
+
+public sealed class ParserByteCheck
+{
+    public int Offset { get; set; }
+    public string Bytes { get; set; } = string.Empty;
 }

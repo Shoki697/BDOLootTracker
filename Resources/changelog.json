@@ -199,43 +199,39 @@
     ]
   },
   "0.12.7": {
-    "title": "v0.12.7 Manual Parser Calibration & Single Instance",
+    "title": "v0.12.7 Ground Loot Calibration & Community Parser",
     "changes": [
       {
-        "title": "Guided weekly-patch parser calibration",
-        "description": "Settings → Network now includes Manual Calibration with three guided steps: Mob Loot, Storage and Market. Mob Loot can rediscover the repeated loot signature, server port and item/quantity offsets from known Garmoth items, while Storage and Market learn non-loot transfer markers from guided Black Stone x100 withdrawals."
+        "title": "Ground-loot-only weekly calibration",
+        "description": "Settings → Network Manual Calibration is reduced to one guided Ground Loot step. Collect normal loot from the ground and the tracker rediscovers the signature, server port, item/quantity offsets and a positive ground-loot fingerprint."
+      },
+      {
+        "title": "Storage / Market no longer need weekly calibration",
+        "description": "Ground-loot profiles accept only packets matching the calibrated ground-loot fingerprint. Storage, Market, Maid and other inventory-add traffic is ignored when it does not match, instead of requiring a separate negative calibration after every patch."
       },
       {
         "title": "Local calibration with rollback",
-        "description": "A completed calibration is stored as a local parser profile and activated for the next tracking session. The last-known-good parser remains available through Roll Back, and a later approved GitHub parser can replace the temporary local repair."
+        "description": "A successful Ground Loot calibration can be activated as a local parser profile for the next tracking session. The last-known-good parser remains available through Roll Back."
       },
       {
-        "title": "Simplified parser controls and background update detection",
-        "description": "The Network tab now keeps only Manual Calibration and Check for Parser Update. The app also checks the GitHub parser manifest quietly in the background and shows a compact parser-update notification when a newer approved profile is available."
-      },
-      {
-        "title": "Single-instance tray protection",
-        "description": "Only one BDO Loot Tracker instance can run at a time. Launching the shortcut again while the tracker is minimized to the system tray restores and focuses the existing window instead of starting a second tracker process."
-      },
-      {
-        "title": "Current weekly parser bundled",
-        "description": "The built-in parser is updated to EU-2026.09.10.2 with loot signature 6F 0D 00, item offset 29, quantity offset 33, and the current Storage / Market Maid transfer suppression markers."
-      },
-      {
-        "title": "Official parser match check",
-        "description": "After Mob Loot, Storage and Market all pass, Manual Calibration downloads the current official GitHub parser and compares the complete calibrated profile. A green match state confirms that no parser change or submission is required; any structural difference is shown clearly."
-      },
-      {
-        "title": "Validated community calibration submission",
-        "description": "Submit Calibration is enabled only after all three guided calibration steps pass and the result differs from the latest official parser. The official parser is checked again immediately before submission to avoid duplicate reports."
+        "title": "Official parser comparison",
+        "description": "After Ground Loot calibration passes, the app compares the meaningful ground-loot parser structure with the current official GitHub profile. Matching profiles need no submission; a different valid profile can be submitted as a community candidate."
       },
       {
         "title": "Automatic community parser distribution",
-        "description": "A validated calibration can open a pre-filled GitHub calibration issue. A repository workflow validates the report and publishes a community parser candidate automatically. Other tracker clients discover community candidates in the background and can install them without waiting for a full application release."
+        "description": "A valid differing Ground Loot calibration is submitted directly to the built-in BDOLootTracker Cloudflare Worker. No browser, GitHub account or issue is required, and other v0.12.7 clients can discover the candidate automatically."
       },
       {
-        "title": "Official parser always supersedes community candidates",
-        "description": "Community parsers are tied to the exact official parser version they were calibrated against. Any later official parser invalidates the temporary community candidate automatically, while last-known-good rollback remains available."
+        "title": "Background parser update detection",
+        "description": "The Network tab keeps Manual Calibration and Check for Parser Update, while the app also checks quietly for newer official or community parser profiles."
+      },
+      {
+        "title": "Single-instance tray protection",
+        "description": "Only one BDO Loot Tracker instance can run at a time. Launching it again while it is in the system tray restores and focuses the existing window instead of starting another tracker."
+      },
+      {
+        "title": "Ground-only weekly parser bundled",
+        "description": "The built-in parser is advanced to EU-2026.09.10.3 with the verified Ground Loot checks at +50 and +133. The baseline contains only the positive Ground Loot fingerprint; Storage/Market suppression markers are no longer part of the weekly profile."
       }
     ]
   }

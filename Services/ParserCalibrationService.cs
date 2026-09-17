@@ -18,6 +18,16 @@ public sealed class ParserCalibrationService : IDisposable
     private const int MaxPacketLengthForDiscovery = 64 * 1024;
     private const ulong MaxDiscoveryQuantity = 10_000_000UL;
     private const uint BlackStoneItemId = 16001;
+    // These offsets are relative to ItemIdOffset so a weekly framing insertion
+    // that moves the item/quantity fields moves the ground-loot discriminator too.
+    // They were verified against normal ground loot vs Storage/Market transfers
+    // after the 2026-09-10 maintenance. Calibration learns the actual bytes from
+    // the user's own ground-loot samples; it does not assume they remain zero.
+    private static readonly (int RelativeOffset, int Length)[] GroundLootTemplates =
+    {
+        (21, 3),
+        (104, 1)
+    };
 
     private readonly object _sync = new();
     private readonly Dictionary<FlowKey, FlowCapture> _flows = new();
@@ -132,7 +142,8 @@ public sealed class ParserCalibrationService : IDisposable
                 Key = x.Key,
                 Count = x.Value.PacketStarts.Count,
                 ItemCount = x.Value.ItemIds.Count,
-                MinPacketLength = x.Value.MinimumPacketLength
+                MinPacketLength = x.Value.MinimumPacketLength,
+                Stat = x.Value
             })
             .OrderByDescending(x => x.Count)
             .ThenByDescending(x => x.ItemCount)
@@ -162,17 +173,30 @@ public sealed class ParserCalibrationService : IDisposable
         profile.ItemIdOffset = best.Key.ItemOffset;
         profile.QuantityOffset = best.Key.QuantityOffset;
         int offsetShift = Math.Max(0, profile.ItemIdOffset - seed.ItemIdOffset);
+
+        List<ParserByteCheck> groundChecks = DiscoverGroundLootChecks(capture, best.Key, best.Stat);
+        if (groundChecks.Count < GroundLootTemplates.Length)
+        {
+            return MobCalibrationResult.Failed(
+                "Loot layout was detected, but a stable ground-loot fingerprint could not be learned. Collect 10–20 normal ground loot events only (no Maid, Market or inventory transfers) and retry.");
+        }
+
+        profile.GroundLootOnly = true;
+        profile.GroundLootChecks = groundChecks;
+
+        int groundRequired = groundChecks.Max(x => x.Offset + ParserProfileService.ParseHex(x.Bytes).Length);
         profile.MinimumLength = Math.Max(
-            seed.MinimumLength + offsetShift,
+            Math.Max(seed.MinimumLength + offsetShift, groundRequired),
             Math.Max(profile.SignatureOffset + signatureLength,
                 Math.Max(profile.ItemIdOffset + 4, profile.QuantityOffset + 8)));
 
+        string fingerprint = string.Join(" • ", groundChecks.Select(x => $"+{x.Offset}={x.Bytes}"));
         return new MobCalibrationResult(
             true,
             profile,
             best.Count,
             Math.Clamp(confidence, 0.0, 1.0),
-            $"Detected {best.Key.Signature} • item +{best.Key.ItemOffset} • quantity +{best.Key.QuantityOffset} • {best.Count} matching loot packets.");
+            $"Ground loot detected: {best.Key.Signature} • item +{best.Key.ItemOffset} • quantity +{best.Key.QuantityOffset} • {fingerprint} • {best.Count} samples.");
     }
 
     public TransferCalibrationResult AnalyzeTransfer(
@@ -348,6 +372,62 @@ public sealed class ParserCalibrationService : IDisposable
         }
 
         return candidates;
+    }
+
+    private static List<ParserByteCheck> DiscoverGroundLootChecks(
+        CalibrationCapture capture,
+        CandidateKey key,
+        CandidateStat stat)
+    {
+        var checks = new List<ParserByteCheck>();
+        var packetRefs = stat.PacketStarts.ToArray();
+        if (packetRefs.Length == 0)
+            return checks;
+
+        foreach ((int relativeOffset, int length) in GroundLootTemplates)
+        {
+            int offset = key.ItemOffset + relativeOffset;
+            byte[]? learned = null;
+            bool stable = true;
+
+            foreach (long token in packetRefs)
+            {
+                int flowIndex = (int)(token >> 32);
+                int start = unchecked((int)(uint)token);
+                if (flowIndex < 0 || flowIndex >= capture.Flows.Count)
+                {
+                    stable = false;
+                    break;
+                }
+
+                byte[] data = capture.Flows[flowIndex].Payload;
+                if (start < 0 || start + offset + length > data.Length)
+                {
+                    stable = false;
+                    break;
+                }
+
+                byte[] value = data.AsSpan(start + offset, length).ToArray();
+                if (learned == null)
+                    learned = value;
+                else if (!learned.AsSpan().SequenceEqual(value))
+                {
+                    stable = false;
+                    break;
+                }
+            }
+
+            if (stable && learned is { Length: > 0 })
+            {
+                checks.Add(new ParserByteCheck
+                {
+                    Offset = offset,
+                    Bytes = ToHex(learned)
+                });
+            }
+        }
+
+        return checks;
     }
 
     private static IEnumerable<int> FindMatchingPacketStarts(
@@ -559,6 +639,10 @@ public sealed class ParserCalibrationService : IDisposable
             MinimumLength = source.MinimumLength,
             MaxReasonableItemId = source.MaxReasonableItemId,
             MaxReasonableQuantity = source.MaxReasonableQuantity,
+            GroundLootOnly = source.GroundLootOnly,
+            GroundLootChecks = (source.GroundLootChecks ?? new List<ParserByteCheck>())
+                .Select(x => new ParserByteCheck { Offset = x.Offset, Bytes = x.Bytes })
+                .ToList(),
             SuppressLookbackBytes = source.SuppressLookbackBytes,
             SuppressStateTimeoutMilliseconds = source.SuppressStateTimeoutMilliseconds,
             SuppressIfPrecededBy = new List<string>(source.SuppressIfPrecededBy ?? new List<string>())

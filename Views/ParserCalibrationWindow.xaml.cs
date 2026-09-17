@@ -8,14 +8,6 @@ namespace BDOLootTracker.Views;
 
 public partial class ParserCalibrationWindow : Window
 {
-    private enum CalibrationStep
-    {
-        None,
-        MobLoot,
-        Storage,
-        Market
-    }
-
     private readonly string _adapterName;
     private readonly bool _exitLagMode;
     private readonly ParserProfileService _profileService;
@@ -24,28 +16,16 @@ public partial class ParserCalibrationWindow : Window
     private readonly HashSet<uint> _knownLootItemIds;
 
     private ParserProfile _workingProfile;
-    private CalibrationStep _activeStep;
-    private bool _mobComplete;
-    private bool _storageComplete;
-    private bool _marketComplete;
+    private bool _capturing;
+    private bool _calibrationComplete;
     private int _mobSampleCount;
     private double _mobConfidence;
-    private int _storageSampleCount;
-    private double _storageConfidence;
-    private int _marketSampleCount;
-    private double _marketConfidence;
-    private string _storageMarker = string.Empty;
-    private string _marketMarker = string.Empty;
     private bool _officialComparisonComplete;
     private bool _matchesOfficial;
 
     public bool ProfileActivated { get; private set; }
 
-    public ParserCalibrationWindow(
-        string adapterName,
-        string databasePath,
-        bool exitLagMode,
-        ParserProfileService profileService)
+    public ParserCalibrationWindow(string adapterName, string databasePath, bool exitLagMode, ParserProfileService profileService)
     {
         InitializeComponent();
         _adapterName = adapterName;
@@ -63,51 +43,35 @@ public partial class ParserCalibrationWindow : Window
             _knownLootItemIds = new HashSet<uint>();
         }
 
-        // Fixed anchors used by the wizard itself.
         _knownLootItemIds.Add(1);
         _knownLootItemIds.Add(ParserCalibrationService.CalibrationItemId);
 
         RefreshHeader();
         Closing += ParserCalibrationWindow_Closing;
-        Closed += (_, _) => _calibrationService.Dispose();
+        Closed += (_, _) =>
+        {
+            _calibrationService.Dispose();
+            _submissionService.Dispose();
+        };
     }
 
     private void MobCapture_Click(object sender, RoutedEventArgs e)
-        => ToggleCapture(CalibrationStep.MobLoot);
-
-    private void StorageCapture_Click(object sender, RoutedEventArgs e)
-        => ToggleCapture(CalibrationStep.Storage);
-
-    private void MarketCapture_Click(object sender, RoutedEventArgs e)
-        => ToggleCapture(CalibrationStep.Market);
-
-    private void ToggleCapture(CalibrationStep step)
     {
-        if (_activeStep == CalibrationStep.None)
+        if (!_capturing)
         {
             try
             {
                 _calibrationService.Start(_adapterName);
-                _activeStep = step;
-                SetCaptureUi(step, capturing: true);
-                LiveStatusText.Text = step switch
-                {
-                    CalibrationStep.MobLoot => "Capturing… collect 5–10 normal mob loot events, then click Stop & analyze.",
-                    CalibrationStep.Storage => "Capturing… withdraw Black Stone ×100 from Storage using a Maid, wait 2–3 seconds, then click Stop & analyze.",
-                    CalibrationStep.Market => "Capturing… withdraw Black Stone ×100 from Central Market Warehouse using a Maid, wait 2–3 seconds, then click Stop & analyze.",
-                    _ => "Capturing…"
-                };
+                _capturing = true;
+                SetCaptureUi(true);
+                LiveStatusText.Text = "Capturing… collect 10–20 normal ground loot events only, then click Stop & analyze.";
             }
             catch (Exception ex)
             {
-                AppDialog.Show(ex.Message, "Manual Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
+                AppDialog.Show(ex.Message, "Ground Loot Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
             }
-
             return;
         }
-
-        if (_activeStep != step)
-            return;
 
         CalibrationCapture capture;
         try
@@ -116,169 +80,71 @@ public partial class ParserCalibrationWindow : Window
         }
         catch (Exception ex)
         {
-            _activeStep = CalibrationStep.None;
-            SetCaptureUi(step, capturing: false);
-            AppDialog.Show(ex.Message, "Manual Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
+            _capturing = false;
+            SetCaptureUi(false);
+            AppDialog.Show(ex.Message, "Ground Loot Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
-        _activeStep = CalibrationStep.None;
-        SetCaptureUi(step, capturing: false);
-        Analyze(step, capture);
+        _capturing = false;
+        SetCaptureUi(false);
+        Analyze(capture);
     }
 
-    private async void Analyze(CalibrationStep step, CalibrationCapture capture)
+    private async void Analyze(CalibrationCapture capture)
     {
         try
         {
-            switch (step)
+            MobCalibrationResult result = _calibrationService.AnalyzeMobLoot(capture, _workingProfile, _knownLootItemIds, _exitLagMode);
+            if (!result.Success || result.Profile == null)
             {
-                case CalibrationStep.MobLoot:
-                {
-                    MobCalibrationResult result = _calibrationService.AnalyzeMobLoot(
-                        capture,
-                        _workingProfile,
-                        _knownLootItemIds,
-                        _exitLagMode);
-
-                    if (!result.Success || result.Profile == null)
-                    {
-                        SetStageStatus(MobStatusText, false, result.Message);
-                        LiveStatusText.Text = result.Message;
-                        return;
-                    }
-
-                    _workingProfile = result.Profile;
-                    _mobComplete = true;
-                    _storageComplete = false;
-                    _marketComplete = false;
-                    _mobSampleCount = result.SampleCount;
-                    _mobConfidence = result.Confidence;
-                    _storageSampleCount = 0;
-                    _storageConfidence = 0;
-                    _marketSampleCount = 0;
-                    _marketConfidence = 0;
-                    _storageMarker = string.Empty;
-                    _marketMarker = string.Empty;
-                    ResetOfficialComparison();
-                    StorageStatusText.Text = "Not calibrated";
-                    MarketStatusText.Text = "Not calibrated";
-                    StorageStatusText.Foreground = MarketStatusText.Foreground = AmberBrush();
-                    string status = $"✓ {result.SampleCount} samples • confidence {result.Confidence:P0} • {result.Profile.Signature} • item +{result.Profile.ItemIdOffset} • qty +{result.Profile.QuantityOffset}";
-                    SetStageStatus(MobStatusText, true, status);
-                    LiveStatusText.Text = result.Message;
-                    break;
-                }
-
-                case CalibrationStep.Storage:
-                {
-                    TransferCalibrationResult result = _calibrationService.AnalyzeTransfer(
-                        capture,
-                        _workingProfile,
-                        ParserCalibrationService.CalibrationItemId,
-                        ParserCalibrationService.CalibrationQuantity,
-                        "Storage");
-
-                    if (!result.Success || result.Profile == null)
-                    {
-                        SetStageStatus(StorageStatusText, false, result.Message);
-                        LiveStatusText.Text = result.Message;
-                        return;
-                    }
-
-                    _workingProfile = result.Profile;
-                    _storageComplete = true;
-                    _marketComplete = false;
-                    _storageSampleCount = result.SampleCount;
-                    _storageConfidence = result.Confidence;
-                    _storageMarker = result.Marker;
-                    _marketSampleCount = 0;
-                    _marketConfidence = 0;
-                    _marketMarker = string.Empty;
-                    ResetOfficialComparison();
-                    MarketStatusText.Text = "Not calibrated";
-                    MarketStatusText.Foreground = AmberBrush();
-                    SetStageStatus(StorageStatusText, true, $"✓ {result.Marker} • confidence {result.Confidence:P0}");
-                    LiveStatusText.Text = result.Message;
-                    break;
-                }
-
-                case CalibrationStep.Market:
-                {
-                    TransferCalibrationResult result = _calibrationService.AnalyzeTransfer(
-                        capture,
-                        _workingProfile,
-                        ParserCalibrationService.CalibrationItemId,
-                        ParserCalibrationService.CalibrationQuantity,
-                        "Market");
-
-                    if (!result.Success || result.Profile == null)
-                    {
-                        SetStageStatus(MarketStatusText, false, result.Message);
-                        LiveStatusText.Text = result.Message;
-                        return;
-                    }
-
-                    _workingProfile = result.Profile;
-                    _marketComplete = true;
-                    _marketSampleCount = result.SampleCount;
-                    _marketConfidence = result.Confidence;
-                    _marketMarker = result.Marker;
-                    SetStageStatus(MarketStatusText, true, $"✓ {result.Marker} • confidence {result.Confidence:P0}");
-                    LiveStatusText.Text = result.Message;
-                    await RefreshOfficialComparisonAsync();
-                    break;
-                }
+                SetStageStatus(false, result.Message);
+                LiveStatusText.Text = result.Message;
+                return;
             }
+
+            _workingProfile = result.Profile;
+            _calibrationComplete = true;
+            _mobSampleCount = result.SampleCount;
+            _mobConfidence = result.Confidence;
+            ResetOfficialComparison();
+
+            SetStageStatus(true, $"✓ {result.SampleCount} samples • confidence {result.Confidence:P0} • ground-loot fingerprint learned");
+            LiveStatusText.Text = result.Message;
+            ActivateProfileButton.IsEnabled = true;
+            RefreshHeader();
+
+            await RefreshOfficialComparisonAsync();
         }
         catch (Exception ex)
         {
+            SetStageStatus(false, ex.Message);
             LiveStatusText.Text = ex.Message;
-            AppDialog.Show(ex.Message, "Manual Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            ActivateProfileButton.IsEnabled = _mobComplete && _storageComplete && _marketComplete;
-            SubmitCalibrationButton.IsEnabled = CanSubmitCalibration();
-            RefreshStageButtonAvailability();
-            RefreshHeader();
         }
     }
 
     private void ActivateProfile_Click(object sender, RoutedEventArgs e)
     {
-        if (!_mobComplete || !_storageComplete || !_marketComplete)
-        {
-            AppDialog.Show(
-                "Complete Mob Loot, Storage and Market calibration first.",
-                "Manual Calibration",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+        if (!_calibrationComplete)
             return;
-        }
 
         try
         {
-            _workingProfile = _profileService.ActivateLocalCalibrationProfile(_workingProfile);
+            ParserProfile activated = _profileService.ActivateLocalCalibrationProfile(_workingProfile);
+            _workingProfile = ParserCalibrationService.Clone(activated);
             ProfileActivated = true;
             RefreshHeader();
-            LiveStatusText.Text = $"Local parser {_workingProfile.ProfileVersion} activated. It will be used the next time tracking starts.";
-
-            AppDialog.Show(
-                "Local calibration activated. The new profile will be used the next time a tracking session starts.",
-                "Manual Calibration",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            LiveStatusText.Text = $"Local ground-loot parser {activated.ProfileVersion} activated. It will be used the next time tracking starts.";
         }
         catch (Exception ex)
         {
-            AppDialog.Show(ex.Message, "Manual Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Show(ex.Message, "Ground Loot Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
     private void Rollback_Click(object sender, RoutedEventArgs e)
     {
-        if (_activeStep != CalibrationStep.None)
+        if (_capturing)
             return;
 
         try
@@ -286,47 +152,40 @@ public partial class ParserCalibrationWindow : Window
             ParserProfile? restored = _profileService.RollbackToLastKnownGood();
             if (restored == null)
             {
-                AppDialog.Show(
-                    "No last-known-good parser profile is available yet.",
-                    "Manual Calibration",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                AppDialog.Show("No last-known-good parser profile is available yet.", "Ground Loot Calibration", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             _workingProfile = ParserCalibrationService.Clone(restored);
-            _mobComplete = false;
-            _storageComplete = false;
-            _marketComplete = false;
+            _calibrationComplete = false;
             _mobSampleCount = 0;
-            _storageSampleCount = 0;
-            _marketSampleCount = 0;
-            _storageMarker = string.Empty;
-            _marketMarker = string.Empty;
+            _mobConfidence = 0;
             ResetOfficialComparison();
             ActivateProfileButton.IsEnabled = false;
-            SubmitCalibrationButton.IsEnabled = false;
-            RefreshStageButtonAvailability();
             MobStatusText.Text = "Not calibrated";
-            StorageStatusText.Text = "Not calibrated";
-            MarketStatusText.Text = "Not calibrated";
-            MobStatusText.Foreground = StorageStatusText.Foreground = MarketStatusText.Foreground = AmberBrush();
+            MobStatusText.Foreground = AmberBrush();
             ProfileActivated = true;
             RefreshHeader();
             LiveStatusText.Text = $"Rolled back to {restored.ProfileVersion}.";
         }
         catch (Exception ex)
         {
-            AppDialog.Show(ex.Message, "Manual Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Show(ex.Message, "Ground Loot Calibration", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
     private async void SubmitCalibration_Click(object sender, RoutedEventArgs e)
     {
-        if (!_mobComplete || !_storageComplete || !_marketComplete)
+        if (!_calibrationComplete)
+        {
+            AppDialog.Show("Complete the Ground Loot calibration successfully before submitting.", "Submit Calibration", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (!_submissionService.IsConfigured)
         {
             AppDialog.Show(
-                "Complete Mob Loot, Storage and Market calibration successfully before submitting.",
+                "The built-in Community parser service is unavailable.",
                 "Submit Calibration",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -336,28 +195,19 @@ public partial class ParserCalibrationWindow : Window
         SubmitCalibrationButton.IsEnabled = false;
         try
         {
-            // Always re-check GitHub immediately before submission. Another user may
-            // have already published the same repair while this wizard was open.
+            // Re-fetch the official parser immediately before sending. If another
+            // repair became official in the meantime, do not submit a duplicate.
             ParserCalibrationComparisonResult comparison = await _profileService.CompareCalibrationWithOfficialAsync(_workingProfile);
             ApplyOfficialComparison(comparison);
 
             if (!comparison.Success)
             {
-                AppDialog.Show(
-                    comparison.Message + "\n\nSubmission stays disabled until the official parser can be checked.",
-                    "Submit Calibration",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                AppDialog.Show(comparison.Message + "\n\nSubmission stays disabled until the official parser can be checked.", "Submit Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-
             if (comparison.MatchesOfficial)
             {
-                AppDialog.Show(
-                    "A matching official parser is already available. No submission is needed.",
-                    "Submit Calibration",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                AppDialog.Show("A matching official parser is already available. No submission is needed.", "Submit Calibration", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -365,24 +215,41 @@ public partial class ParserCalibrationWindow : Window
             {
                 AppVersion = ParserCalibrationSubmissionService.CurrentAppVersion,
                 BaseOfficialVersion = comparison.OfficialVersion,
-                AllStepsPassed = true,
+                CalibrationPassed = true,
                 DiffersFromOfficial = true,
-                CalibrationItemId = ParserCalibrationService.CalibrationItemId,
-                CalibrationQuantity = ParserCalibrationService.CalibrationQuantity,
                 MobSampleCount = _mobSampleCount,
                 MobConfidence = _mobConfidence,
-                StorageSampleCount = _storageSampleCount,
-                StorageConfidence = _storageConfidence,
-                MarketSampleCount = _marketSampleCount,
-                MarketConfidence = _marketConfidence,
-                StorageMarker = _storageMarker,
-                MarketMarker = _marketMarker,
+                GroundLootCheckCount = _workingProfile.GroundLootChecks?.Count ?? 0,
                 Profile = ParserCalibrationService.Clone(_workingProfile)
             };
 
-            _submissionService.OpenGitHubSubmission(report);
+            CommunityParserSubmissionResult result = await _submissionService.SubmitAsync(report);
+            if (!result.Success)
+            {
+                AppDialog.Show(result.Message, "Submit Calibration", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (result.AlreadyCurrent)
+            {
+                AppDialog.Show(
+                    string.IsNullOrWhiteSpace(result.Message)
+                        ? "An identical Community parser candidate is already available."
+                        : result.Message,
+                    "Submit Calibration",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            string candidate = string.IsNullOrWhiteSpace(result.CandidateVersion)
+                ? string.Empty
+                : $"\n\nCandidate: {result.CandidateVersion}";
+
             AppDialog.Show(
-                "GitHub opened with the validated calibration report pre-filled. Review it and submit the issue. After submission, the repository workflow validates it and automatically publishes a community parser candidate for other users.",
+                (string.IsNullOrWhiteSpace(result.Message)
+                    ? "Calibration submitted directly to the Community parser service. Other clients can detect the candidate automatically."
+                    : result.Message) + candidate,
                 "Submit Calibration",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -403,9 +270,7 @@ public partial class ParserCalibrationWindow : Window
         OfficialComparisonBorder.Visibility = Visibility.Visible;
         OfficialComparisonText.Text = "Checking the current official GitHub parser…";
         OfficialComparisonText.Foreground = AmberBrush();
-
-        ParserCalibrationComparisonResult result = await _profileService.CompareCalibrationWithOfficialAsync(_workingProfile);
-        ApplyOfficialComparison(result);
+        ApplyOfficialComparison(await _profileService.CompareCalibrationWithOfficialAsync(_workingProfile));
     }
 
     private void ApplyOfficialComparison(ParserCalibrationComparisonResult result)
@@ -426,7 +291,10 @@ public partial class ParserCalibrationWindow : Window
         }
         else
         {
-            OfficialComparisonText.Text = $"⚠ Differs from current official parser • {result.OfficialVersion}\nAll three calibration steps passed, so this repair can be submitted as a community candidate.";
+            string serviceState = _submissionService.IsConfigured
+                ? $"Community service: {_submissionService.ConfiguredBaseUrl}"
+                : "Community service is not configured. Set its URL in Settings > Network before submitting.";
+            OfficialComparisonText.Text = $"⚠ Differs from current official parser • {result.OfficialVersion}\nGround-loot calibration passed. {serviceState}";
             OfficialComparisonText.Foreground = AmberBrush();
         }
 
@@ -443,24 +311,16 @@ public partial class ParserCalibrationWindow : Window
     }
 
     private bool CanSubmitCalibration()
-        => _activeStep == CalibrationStep.None &&
-           _mobComplete && _storageComplete && _marketComplete &&
-           _officialComparisonComplete && !_matchesOfficial;
+        => !_capturing && _calibrationComplete && _officialComparisonComplete && !_matchesOfficial && _submissionService.IsConfigured;
 
-    private void Close_Click(object sender, RoutedEventArgs e)
-        => Close();
+    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     private void ParserCalibrationWindow_Closing(object? sender, CancelEventArgs e)
     {
-        if (_activeStep == CalibrationStep.None)
+        if (!_capturing)
             return;
 
-        var result = AppDialog.Show(
-            "Calibration capture is still running. Stop it and close?",
-            "Manual Calibration",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-
+        var result = AppDialog.Show("Calibration capture is still running. Stop it and close?", "Ground Loot Calibration", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result != MessageBoxResult.Yes)
         {
             e.Cancel = true;
@@ -468,56 +328,31 @@ public partial class ParserCalibrationWindow : Window
         }
 
         _ = _calibrationService.Stop();
-        _activeStep = CalibrationStep.None;
+        _capturing = false;
     }
 
-    private void SetCaptureUi(CalibrationStep step, bool capturing)
+    private void SetCaptureUi(bool capturing)
     {
-        if (capturing)
-        {
-            MobCaptureButton.IsEnabled = step == CalibrationStep.MobLoot;
-            StorageCaptureButton.IsEnabled = step == CalibrationStep.Storage;
-            MarketCaptureButton.IsEnabled = step == CalibrationStep.Market;
-        }
-        else
-        {
-            RefreshStageButtonAvailability();
-        }
-
-        RollbackButton.IsEnabled = !capturing;
-        ActivateProfileButton.IsEnabled = !capturing && _mobComplete && _storageComplete && _marketComplete;
-        SubmitCalibrationButton.IsEnabled = !capturing && CanSubmitCalibration();
-
-        MobCaptureButton.Content = capturing && step == CalibrationStep.MobLoot ? "Stop & analyze" : "Start capture";
-        StorageCaptureButton.Content = capturing && step == CalibrationStep.Storage ? "Stop & analyze" : "Start capture";
-        MarketCaptureButton.Content = capturing && step == CalibrationStep.Market ? "Stop & analyze" : "Start capture";
-    }
-
-    private void RefreshStageButtonAvailability()
-    {
-        if (_activeStep != CalibrationStep.None)
-            return;
-
+        MobCaptureButton.Content = capturing ? "Stop & analyze" : "Start capture";
         MobCaptureButton.IsEnabled = true;
-        StorageCaptureButton.IsEnabled = _mobComplete;
-        MarketCaptureButton.IsEnabled = _mobComplete && _storageComplete;
+        RollbackButton.IsEnabled = !capturing;
+        ActivateProfileButton.IsEnabled = !capturing && _calibrationComplete;
+        SubmitCalibrationButton.IsEnabled = !capturing && CanSubmitCalibration();
     }
 
     private void RefreshHeader()
     {
-        ActiveProfileText.Text = $"Working profile: {_workingProfile.ProfileVersion}  •  port {_workingProfile.ServerPort}  •  signature {_workingProfile.Signature}";
+        string mode = _workingProfile.GroundLootOnly ? "ground-only" : "legacy";
+        ActiveProfileText.Text = $"Working profile: {_workingProfile.ProfileVersion}  •  port {_workingProfile.ServerPort}  •  signature {_workingProfile.Signature}  •  {mode}";
         if (string.IsNullOrWhiteSpace(LiveStatusText.Text))
-            LiveStatusText.Text = "Run the three guided steps after a weekly patch if normal loot or Maid withdrawals are being parsed incorrectly.";
+            LiveStatusText.Text = "After a weekly patch, calibrate using normal loot picked up from the ground. No Storage or Market calibration is required.";
     }
 
-    private static void SetStageStatus(System.Windows.Controls.TextBlock target, bool success, string text)
+    private void SetStageStatus(bool success, string text)
     {
-        target.Text = text;
-        target.Foreground = success
-            ? new SolidColorBrush(Color.FromRgb(34, 197, 94))
-            : new SolidColorBrush(Color.FromRgb(248, 113, 113));
+        MobStatusText.Text = text;
+        MobStatusText.Foreground = success ? new SolidColorBrush(Color.FromRgb(34, 197, 94)) : new SolidColorBrush(Color.FromRgb(248, 113, 113));
     }
 
-    private static Brush AmberBrush()
-        => new SolidColorBrush(Color.FromRgb(251, 191, 36));
+    private static Brush AmberBrush() => new SolidColorBrush(Color.FromRgb(251, 191, 36));
 }

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "latestProfileVersion": "EU-2026.09.10.2",
+  "latestProfileVersion": "EU-2026.09.10.3",
   "profileUrl": "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/eu-current.json",
-  "profileSha256": "bfc33921679242928659c52481fd8f3bcefe219552d696e89f3e8f7e3a6d9058",
+  "profileSha256": "8a5d672492a4bd61ae70661cf8c262982841315431cef8e14c85f93da618f852",
   "sampleVersion": "",
   "sampleUrl": "",
   "sampleSha256": "",
-  "notes": "2026-09-10 v2: verified current loot parser after maintenance and updated Storage/Maid and Market/Maid transfer suppression markers. Storage withdrawal marker: 06 00 00 3E 10 00. Market withdrawal marker: 06 00 00 3E 10 02. Loot signature remains 6F 0D 00, item offset 29, quantity offset 33, server port 8889."
+  "notes": "Ground-Loot-only baseline. Only packets matching the calibrated Ground Loot fingerprint are accepted; no Storage/Market transfer suppression markers are required."
 }

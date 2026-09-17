@@ -529,10 +529,14 @@ public partial class SettingsWindow : Window
             ParserStatusText.Text = $"Ready • {profile.ProfileVersion}";
             ParserStatusText.Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94));
             ParserHealthDot.Foreground = new SolidColorBrush(Color.FromRgb(34, 197, 94));
+            string parserMode = profile.GroundLootOnly
+                ? $"Ground Loot only • Ground checks: {profile.GroundLootChecks?.Count ?? 0}"
+                : $"Legacy parser • Transfer markers: {profile.SuppressIfPrecededBy?.Count ?? 0}";
+
             ParserDetailsText.Text =
                 $"Profile source: {source} • {lastGoodText} • Server port: {profile.ServerPort} • " +
                 $"Signature: {profile.Signature} • Item offset: {profile.ItemIdOffset} • Quantity offset: {profile.QuantityOffset} • " +
-                $"Transfer lookback: {profile.SuppressLookbackBytes} B • Suppress markers: {profile.SuppressIfPrecededBy?.Count ?? 0}. " +
+                $"{parserMode}. " +
                 (string.IsNullOrWhiteSpace(sampleVersion)
                     ? "No cached packet sample."
                     : $"Cached packet sample: {sampleVersion}.");

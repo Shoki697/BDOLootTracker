@@ -504,6 +504,7 @@ public sealed class CaptureService : IDisposable
         private readonly ParserProfile _profile;
         private readonly byte[] _signature;
         private readonly List<byte[]> _suppressMarkers;
+        private readonly List<(int Offset, byte[] Bytes)> _groundLootChecks;
         private readonly List<byte> _buffer = new();
 
         private long _bufferBaseOffset;
@@ -515,10 +516,20 @@ public sealed class CaptureService : IDisposable
         {
             _profile = profile;
             _signature = ParserProfileService.ParseHex(profile.Signature);
-            _suppressMarkers = (profile.SuppressIfPrecededBy ?? new List<string>())
-                .Select(ParserProfileService.ParseHex)
-                .Where(x => x.Length > 0)
+            _groundLootChecks = (profile.GroundLootChecks ?? new List<ParserByteCheck>())
+                .Select(x => (x.Offset, ParserProfileService.ParseHex(x.Bytes)))
+                .Where(x => x.Item2.Length > 0)
                 .ToList();
+
+            // Ground-loot-only profiles are positive allowlists. Transfer markers
+            // are kept in the JSON for backwards compatibility with older clients,
+            // but this parser deliberately does not arm suppression state in this mode.
+            _suppressMarkers = profile.GroundLootOnly
+                ? new List<byte[]>()
+                : (profile.SuppressIfPrecededBy ?? new List<string>())
+                    .Select(ParserProfileService.ParseHex)
+                    .Where(x => x.Length > 0)
+                    .ToList();
         }
 
         public event Action<uint, ulong>? LootReceived;
@@ -559,8 +570,8 @@ public sealed class CaptureService : IDisposable
                 }
 
                 ObserveSuppressMarkersBefore(candidateStart);
-                bool stateSuppress = HasPendingTransferSuppression();
-                bool suppress = stateSuppress || IsSuppressedByLookback(candidateStart);
+                bool stateSuppress = !_profile.GroundLootOnly && HasPendingTransferSuppression();
+                bool suppress = !_profile.GroundLootOnly && (stateSuppress || IsSuppressedByLookback(candidateStart));
 
                 if (candidateStart > 0)
                     RemovePrefix(candidateStart);
@@ -578,6 +589,14 @@ public sealed class CaptureService : IDisposable
 
                 if (_buffer.Count < packetLength)
                     return;
+
+                if (_profile.GroundLootOnly && !MatchesGroundLoot(packetLength))
+                {
+                    // It is a valid inventory-add shaped packet, but not the
+                    // calibrated ground-loot subtype (Storage/Market/Maid/etc.).
+                    RemovePrefix(packetLength);
+                    continue;
+                }
 
                 uint itemId = BinaryPrimitives.ReadUInt32LittleEndian(
                     CollectionsMarshal.AsSpan(_buffer).Slice(_profile.ItemIdOffset, 4));
@@ -609,6 +628,25 @@ public sealed class CaptureService : IDisposable
 
                 RemovePrefix(packetLength);
             }
+        }
+
+        private bool MatchesGroundLoot(int packetLength)
+        {
+            if (!_profile.GroundLootOnly)
+                return true;
+            if (_groundLootChecks.Count == 0)
+                return false;
+
+            var span = CollectionsMarshal.AsSpan(_buffer);
+            foreach ((int offset, byte[] bytes) in _groundLootChecks)
+            {
+                if (offset < 0 || offset + bytes.Length > packetLength)
+                    return false;
+                if (!span.Slice(offset, bytes.Length).SequenceEqual(bytes))
+                    return false;
+            }
+
+            return true;
         }
 
         private int FindSignature()
