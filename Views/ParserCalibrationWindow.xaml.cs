@@ -36,17 +36,26 @@ public partial class ParserCalibrationWindow : Window
         try
         {
             var database = new DatabaseService(databasePath);
-            _knownLootItemIds = database.GetGarmothKnownLootItemIds();
+            HashSet<uint> highConfidence = database.GetCalibrationHighConfidenceLootItemIds();
+            HashSet<uint> legacyMapped = database.GetCalibrationTrustedLootItemIds();
+
+            // Prefer the small trash/rare set. If an old database predates the
+            // metadata flags, fall back to the exact mapped-item set used by the
+            // original live v0.12.7 calibration.
+            _knownLootItemIds = highConfidence.Count >= 5
+                ? highConfidence
+                : legacyMapped;
         }
         catch
         {
             _knownLootItemIds = new HashSet<uint>();
         }
 
-        _knownLootItemIds.Add(1);
+        _knownLootItemIds.Remove(1);
         _knownLootItemIds.Add(ParserCalibrationService.CalibrationItemId);
 
         RefreshHeader();
+        LiveStatusText.Text = $"Ready. Isolated calibration anchors: {_knownLootItemIds.Count:N0} item IDs • Silver excluded • Garmoth-only display filter ignored.";
         Closing += ParserCalibrationWindow_Closing;
         Closed += (_, _) =>
         {

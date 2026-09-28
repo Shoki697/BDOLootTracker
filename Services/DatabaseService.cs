@@ -722,8 +722,44 @@ public sealed class DatabaseService
         if (spots == null || spots.Count == 0)
             return;
 
+        var validSpots = spots
+            .Where(x => !string.IsNullOrWhiteSpace(x.SpotKey) &&
+                        !string.IsNullOrWhiteSpace(x.Name))
+            .ToList();
+
+        int incomingSpotCount = validSpots.Count;
+        int incomingLinkCount = validSpots.Sum(x => x.ItemIds.Where(id => id > 0).Distinct().Count());
+
+        // Never destroy a healthy local Garmoth mapping because one endpoint returned
+        // a partial payload. The tracker can keep using the previous cache and retry on
+        // the next explicit database refresh.
+        if (incomingSpotCount < 40 || incomingLinkCount < 60)
+        {
+            throw new InvalidDataException(
+                $"Garmoth spot reference looks incomplete ({incomingSpotCount} spots / {incomingLinkCount} item links). " +
+                "The existing local spot map was kept.");
+        }
+
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
+
+        int existingSpotCount = ExecuteCount(connection, "SELECT COUNT(*) FROM GrindSpots;");
+        int existingLinkCount = ExecuteCount(connection, "SELECT COUNT(*) FROM GrindSpotDrops;");
+
+        if (existingSpotCount >= 40 && incomingSpotCount < Math.Ceiling(existingSpotCount * 0.60))
+        {
+            throw new InvalidDataException(
+                $"Garmoth spot reference shrank unexpectedly ({existingSpotCount} -> {incomingSpotCount} spots). " +
+                "The existing local spot map was kept.");
+        }
+
+        if (existingLinkCount >= 60 && incomingLinkCount < Math.Ceiling(existingLinkCount * 0.50))
+        {
+            throw new InvalidDataException(
+                $"Garmoth spot/drop reference shrank unexpectedly ({existingLinkCount} -> {incomingLinkCount} links). " +
+                "The existing local spot map was kept.");
+        }
+
         using var transaction = connection.BeginTransaction();
 
         using (var clearDrops = connection.CreateCommand())
@@ -761,10 +797,8 @@ public sealed class DatabaseService
 
         string updated = fetchedAtUtc.ToString("O");
 
-        foreach (var spot in spots)
+        foreach (var spot in validSpots)
         {
-            if (string.IsNullOrWhiteSpace(spot.SpotKey) || string.IsNullOrWhiteSpace(spot.Name))
-                continue;
 
             sKey.Value = spot.SpotKey;
             sName.Value = spot.Name;
@@ -813,7 +847,98 @@ public sealed class DatabaseService
         return result;
     }
 
-    public HashSet<uint> GetGarmothKnownLootItemIds()
+    /// <summary>
+    /// Returns the complete cached Garmoth spot catalog for manual session assignment.
+    /// This intentionally includes spots without a usable spot -> item mapping so
+    /// gathering/life-skill locations and ambiguous locations can still be selected.
+    /// </summary>
+    public IReadOnlyList<SpotCandidate> GetAllGarmothSpots()
+    {
+        var result = new List<SpotCandidate>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT SpotKey, Name
+            FROM GrindSpots
+            WHERE TRIM(COALESCE(SpotKey, '')) <> ''
+              AND TRIM(COALESCE(Name, '')) <> ''
+            ORDER BY Name COLLATE NOCASE, SpotKey COLLATE NOCASE;
+            """;
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            result.Add(new SpotCandidate
+            {
+                SpotKey = reader.GetString(0),
+                Name = reader.GetString(1)
+            });
+        }
+
+        // The merged cache can contain both a slug-key row from the external
+        // feed and a numeric-key row from getGrindSpots for the same display name.
+        // The session picker should show one clean entry and prefer the numeric
+        // Garmoth id because it can be uploaded without any further resolution.
+        return result
+            .GroupBy(
+                x => string.Concat(x.Name.Where(char.IsLetterOrDigit)).ToLowerInvariant(),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(x => int.TryParse(x.SpotKey, out int numericId) && numericId > 0)
+                .ThenBy(x => x.SpotKey, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// High-confidence anchors for guided Ground Loot calibration.
+    /// Only items that are both mapped to a Garmoth spot and classified by the
+    /// downloaded loot catalog as trash or rare are included.  This keeps the
+    /// expanded manual spot catalog from polluting parser discovery with hundreds
+    /// of unrelated item IDs.
+    /// </summary>
+    public HashSet<uint> GetCalibrationHighConfidenceLootItemIds()
+    {
+        var result = new HashSet<uint>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT DISTINCT g.ItemId
+            FROM GrindSpotDrops g
+            INNER JOIN Items i ON i.ItemId = g.ItemId
+            WHERE g.ItemId > 1
+              AND (i.IsTrash <> 0 OR i.IsRare <> 0);
+            """;
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long raw = reader.GetInt64(0);
+            if (raw > 1 && raw <= uint.MaxValue)
+                result.Add((uint)raw);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Returns the conservative loot-item anchor set used by the proven v0.12.7
+    /// GitHub calibration algorithm.  This intentionally mirrors the original
+    /// GetGarmothKnownLootItemIds() behaviour: only item IDs that are actually
+    /// mapped to a Garmoth grind spot are used as packet-layout anchors.
+    ///
+    /// Important: this does NOT apply the user's "Only show Garmoth items" filter
+    /// to calibration.  It is only a narrow trusted-ID dictionary used to avoid
+    /// matching arbitrary catalog IDs inside unrelated BDO packets.
+    /// </summary>
+    public HashSet<uint> GetCalibrationTrustedLootItemIds()
     {
         var result = new HashSet<uint>();
 
@@ -828,6 +953,114 @@ public sealed class DatabaseService
         {
             long raw = reader.GetInt64(0);
             if (raw > 0 && raw <= uint.MaxValue)
+                result.Add((uint)raw);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Broad local item catalog. Kept for diagnostics/future fallback work, but
+    /// intentionally NOT used by the normal guided calibration because the full
+    /// catalog creates too many accidental ItemId matches in unrelated packets.
+    /// </summary>
+    public HashSet<uint> GetCalibrationKnownItemIds()
+    {
+        var result = new HashSet<uint>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT ItemId FROM Items WHERE ItemId > 1
+            UNION
+            SELECT ItemId FROM ItemNames WHERE ItemId > 1;
+            """;
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long raw = reader.GetInt64(0);
+            if (raw > 1 && raw <= uint.MaxValue)
+                result.Add((uint)raw);
+        }
+
+        return result;
+    }
+
+    public HashSet<uint> GetGarmothKnownLootItemIds(string region)
+    {
+        region = NormalizeRegion(region);
+        var result = new HashSet<uint>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        // The external Garmoth `drops` catalog is the authoritative source for the
+        // optional live-loot filter. Do NOT derive the filter only from GrindSpotDrops:
+        // a newly added spot/item can already exist in Garmoth's loot catalog while the
+        // separate spot -> item relationship feed is still catching up.
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT DISTINCT ItemId
+            FROM ItemPrices
+            WHERE Region = $region AND ItemId > 0
+            UNION
+            SELECT DISTINCT ItemId
+            FROM GrindSpotDrops
+            WHERE ItemId > 0;
+            """;
+        command.Parameters.AddWithValue("$region", region);
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long raw = reader.GetInt64(0);
+            if (raw > 0 && raw <= uint.MaxValue)
+                result.Add((uint)raw);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Returns item IDs that behave like gathering/lifeskill loot. Instead of
+    /// trying to distinguish individual gathering locations, an item is considered
+    /// gathering evidence when every cached Garmoth spot containing it is a
+    /// non-trash spot. Common combat drops (Black Stones, Caphras, Spirit Dust,
+    /// etc.) are therefore excluded as soon as they also appear at any normal
+    /// grind spot that has a trash-loot mapping.
+    /// </summary>
+    public HashSet<uint> GetGatheringLootItemIds()
+    {
+        var result = new HashSet<uint>();
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            WITH SpotKinds AS (
+                SELECT d.SpotKey,
+                       MAX(CASE WHEN COALESCE(i.IsTrash, 0) <> 0 THEN 1 ELSE 0 END) AS HasTrash
+                FROM GrindSpotDrops d
+                LEFT JOIN Items i ON i.ItemId = d.ItemId
+                GROUP BY d.SpotKey
+            )
+            SELECT d.ItemId
+            FROM GrindSpotDrops d
+            INNER JOIN SpotKinds k ON k.SpotKey = d.SpotKey
+            WHERE d.ItemId > 1
+            GROUP BY d.ItemId
+            HAVING MAX(k.HasTrash) = 0;
+            """;
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long raw = reader.GetInt64(0);
+            if (raw > 1 && raw <= uint.MaxValue)
                 result.Add((uint)raw);
         }
 
@@ -1069,9 +1302,12 @@ public sealed class DatabaseService
         int nameCount = ExecuteCount(connection, "SELECT COUNT(*) FROM ItemNames WHERE Language = $value;", language);
         int marketCount = ExecuteCount(connection, "SELECT COUNT(*) FROM ItemPrices WHERE Region = $value AND ItemId <> 1;", region);
         int iconCount = ExecuteCount(connection, "SELECT COUNT(*) FROM Items WHERE LocalIconPath IS NOT NULL AND LocalIconPath <> ''; ");
+        int grindSpotCount = ExecuteCount(connection, "SELECT COUNT(*) FROM GrindSpots;");
+        int grindSpotDropLinkCount = ExecuteCount(connection, "SELECT COUNT(*) FROM GrindSpotDrops;");
 
         DateTime? catalogUpdated = ParseMetadataDate(GetMetadata(connection, "catalog_updated_utc"));
         DateTime? marketUpdated = ParseMetadataDate(GetMetadata(connection, MarketMetadataKey(region)));
+        DateTime? grindSpotsUpdated = ParseMetadataDate(GetMetadata(connection, "grind_spots_updated_utc"));
 
         return new DatabaseHealth
         {
@@ -1082,7 +1318,10 @@ public sealed class DatabaseService
             ItemCount = itemCount,
             NameCount = nameCount,
             MarketPriceCount = marketCount,
-            CachedIconCount = iconCount
+            CachedIconCount = iconCount,
+            GrindSpotCount = grindSpotCount,
+            GrindSpotDropLinkCount = grindSpotDropLinkCount,
+            GrindSpotsUpdatedUtc = grindSpotsUpdated
         };
     }
 

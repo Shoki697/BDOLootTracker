@@ -234,5 +234,34 @@
         "description": "The built-in parser is advanced to EU-2026.09.10.3 with the verified Ground Loot checks at +50 and +133. The baseline contains only the positive Ground Loot fingerprint; Storage/Market suppression markers are no longer part of the weekly profile."
       }
     ]
+  },
+  "0.13.0": {
+    "title": "v0.13.0 Gathering & Spot Detection Update",
+    "changes": [
+      {
+        "title": "Gathering tracking",
+        "description": "Gathering now uses its own packet parser and is tracked separately from normal Ground Loot. Gathering sessions are labeled Gathering automatically and their loot is added to the session in real time."
+      },
+      {
+        "title": "Searchable manual spot selection",
+        "description": "Session History and the Garmoth upload review now include a searchable Garmoth spot picker. Auto-detected Gathering sessions intentionally ask for the exact gathering spot before upload."
+      },
+      {
+        "title": "Improved grind-spot detection",
+        "description": "Garmoth spot mapping and detection were hardened for older and newer grind spots while keeping concrete combat spot detection separate from the broad Gathering category."
+      },
+      {
+        "title": "Parser and calibration stability",
+        "description": "Manual Calibration remains isolated from the Garmoth-only loot filter and uses a conservative anchor set to reduce false calibration candidates after weekly BDO patches."
+      },
+      {
+        "title": "Garmoth filtering stays optional",
+        "description": "The Garmoth-only filter remains available for normal live loot. Confirmed Gathering result packets are accepted independently so incomplete Garmoth gathering mappings cannot hide real gathering loot."
+      },
+      {
+        "title": "One-time database refresh recommended",
+        "description": "After updating, run Settings → Database & Loot → Fetch / Update Database once to refresh prices, item metadata and the cached Garmoth spot list used by manual spot selection and uploads."
+      }
+    ]
   }
 }

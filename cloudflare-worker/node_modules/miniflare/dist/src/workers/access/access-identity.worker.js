@@ -1,0 +1,11 @@
+// src/workers/access/access-identity.worker.ts
+import { WorkerEntrypoint } from "cloudflare:workers";
+var AccessIdentityBinding = class extends WorkerEntrypoint {
+  async getIdentity() {
+    return this.ctx.props.jwtClaims;
+  }
+};
+export {
+  AccessIdentityBinding as default
+};
+//# sourceMappingURL=access-identity.worker.js.map

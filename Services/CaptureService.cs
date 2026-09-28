@@ -23,9 +23,12 @@ public sealed class CaptureService : IDisposable
     private bool _exitLagMode;
     private DateTime _nextConnectionCleanupUtc;
 
+    private long _tcpPayloadBytes;
     private long _serverPayloadBytes;
     private long _validLootCount;
     private long _suppressedTransferCount;
+    private long _nonGroundInventoryCandidateCount;
+    private long _gatheringPacketLootCount;
     private long _lastServerPacketTicks;
     private long _lastValidLootTicks;
 
@@ -39,12 +42,16 @@ public sealed class CaptureService : IDisposable
 
     public bool IsRunning { get; private set; }
     public bool ExitLagModeEnabled => _exitLagMode;
+    public long TcpPayloadBytesObserved => Interlocked.Read(ref _tcpPayloadBytes);
     public long ServerPayloadBytesReceived => Interlocked.Read(ref _serverPayloadBytes);
     public long ValidLootCount => Interlocked.Read(ref _validLootCount);
     public long SuppressedTransferCount => Interlocked.Read(ref _suppressedTransferCount);
+    public long NonGroundInventoryCandidateCount => Interlocked.Read(ref _nonGroundInventoryCandidateCount);
+    public long GatheringPacketLootCount => Interlocked.Read(ref _gatheringPacketLootCount);
     public DateTime? LastServerPacketUtc => ToUtcDateTime(Interlocked.Read(ref _lastServerPacketTicks));
     public DateTime? LastValidLootUtc => ToUtcDateTime(Interlocked.Read(ref _lastValidLootTicks));
     public string ActiveProfileVersion => _parserProfile.ProfileVersion;
+    public int ActiveServerPort => _parserProfile.ServerPort;
 
     public string ActiveExitLagRelay
     {
@@ -65,6 +72,15 @@ public sealed class CaptureService : IDisposable
     }
 
     public event Action<uint, ulong>? LootReceived;
+    // Inventory-add shaped packets that match the active signature/offsets but fail
+    // the positive Ground Loot fingerprint. Gathering uses this path because its
+    // inventory-add subtype is not always the same as mob ground loot. MainWindow
+    // only accepts these candidates when the item itself is strong gathering evidence.
+    public event Action<uint, ulong>? NonGroundInventoryCandidateReceived;
+    // Confirmed Gathering result packets use their own BDO application packet
+    // family and are intentionally independent from the calibrated Ground Loot
+    // parser profile.
+    public event Action<uint, ulong>? GatheringLootReceived;
     public event Action<string>? StatusChanged;
     public event Action<Exception>? CaptureError;
 
@@ -98,9 +114,12 @@ public sealed class CaptureService : IDisposable
             _nextConnectionCleanupUtc = DateTime.UtcNow.AddSeconds(30);
         }
 
+        Interlocked.Exchange(ref _tcpPayloadBytes, 0);
         Interlocked.Exchange(ref _serverPayloadBytes, 0);
         Interlocked.Exchange(ref _validLootCount, 0);
         Interlocked.Exchange(ref _suppressedTransferCount, 0);
+        Interlocked.Exchange(ref _nonGroundInventoryCandidateCount, 0);
+        Interlocked.Exchange(ref _gatheringPacketLootCount, 0);
         Interlocked.Exchange(ref _lastServerPacketTicks, 0);
         Interlocked.Exchange(ref _lastValidLootTicks, 0);
 
@@ -108,13 +127,14 @@ public sealed class CaptureService : IDisposable
         _device.OnPacketArrival += OnPacketArrival;
         _device.Open(DeviceModes.Promiscuous, read_timeout: 1000);
 
-        // Normal BDO connections still use the known server port and retain the
-        // narrow BPF filter. ExitLag replaces that server endpoint with dynamic
-        // relay ports, so compatibility mode scans TCP payloads and lets the BDO
-        // parser identify/lock one valid relay stream at runtime.
-        _device.Filter = exitLagMode
-            ? "tcp"
-            : $"tcp src port {_parserProfile.ServerPort}";
+        // Capture TCP broadly in both modes and do the BDO source-port check in
+        // managed code. Manual Calibration already uses the same broad filter.
+        // On some Npcap/driver/offload combinations the narrower BPF expression
+        // ("tcp src port 8889") can yield no callbacks even though Wireshark and
+        // the calibration capture see the traffic. Keeping one capture path also
+        // gives diagnostics enough information to distinguish a wrong adapter
+        // from a parser/port problem.
+        _device.Filter = "tcp";
 
         _device.StartCapture();
 
@@ -165,11 +185,16 @@ public sealed class CaptureService : IDisposable
             if (tcp == null)
                 return;
 
-            if (!_exitLagMode && tcp.SourcePort != _parserProfile.ServerPort)
-                return;
-
             byte[]? payload = tcp.PayloadData;
             if (payload == null || payload.Length == 0)
+                return;
+
+            Interlocked.Add(ref _tcpPayloadBytes, payload.Length);
+
+            // Standard mode still accepts only server -> client payload from the
+            // configured BDO port. The difference is that this filtering happens
+            // after capture, rather than in Npcap's BPF layer.
+            if (!_exitLagMode && tcp.SourcePort != _parserProfile.ServerPort)
                 return;
 
             var flow = new FlowKey(tcp.SourcePort, tcp.DestinationPort);
@@ -185,6 +210,10 @@ public sealed class CaptureService : IDisposable
                     connection = new BdoConnection(_parserProfile, flow);
                     connection.Parser.LootReceived += (itemId, quantity) =>
                         Parser_LootReceived(connection, itemId, quantity);
+                    connection.Parser.NonGroundInventoryCandidate += (itemId, quantity) =>
+                        Parser_NonGroundInventoryCandidate(connection, itemId, quantity);
+                    connection.GatheringParser.LootReceived += (itemId, quantity) =>
+                        Parser_GatheringLootReceived(connection, itemId, quantity);
                     connection.Parser.TransferSuppressed += (itemId, quantity) =>
                         Parser_TransferSuppressed(connection, itemId, quantity);
                     _connections[flow] = connection;
@@ -210,7 +239,11 @@ public sealed class CaptureService : IDisposable
             connection.Reassembler.Push(
                 tcp.SequenceNumber,
                 payload,
-                data => connection.Parser.Push(data));
+                data =>
+                {
+                    connection.Parser.Push(data);
+                    connection.GatheringParser.Push(data);
+                });
         }
         catch (Exception ex)
         {
@@ -292,6 +325,30 @@ public sealed class CaptureService : IDisposable
         }
 
         EmitLoot(itemId, quantity);
+    }
+
+
+    private void Parser_GatheringLootReceived(BdoConnection connection, uint itemId, ulong quantity)
+    {
+        Interlocked.Increment(ref _gatheringPacketLootCount);
+
+        // In standard mode there is only one configured BDO server-port stream.
+        // ExitLag may mirror the stream; MainWindow applies a short item/quantity
+        // dedupe before accepting these events, so pre-lock candidates are safe.
+        if (!_exitLagMode || _activeExitLagFlow == null || IsActiveExitLagFlow(connection.Flow))
+            GatheringLootReceived?.Invoke(itemId, quantity);
+    }
+
+    private void Parser_NonGroundInventoryCandidate(BdoConnection connection, uint itemId, ulong quantity)
+    {
+        Interlocked.Increment(ref _nonGroundInventoryCandidateCount);
+
+        // Standard capture has a single server-port stream, so forward directly.
+        // With ExitLag, forward candidates from the active relay when one is already
+        // known. Before a relay is locked we also forward them; MainWindow performs
+        // a short item/quantity dedupe before accepting gathering evidence.
+        if (!_exitLagMode || _activeExitLagFlow == null || IsActiveExitLagFlow(connection.Flow))
+            NonGroundInventoryCandidateReceived?.Invoke(itemId, quantity);
     }
 
     private void Parser_TransferSuppressed(BdoConnection connection, uint itemId, ulong quantity)
@@ -398,12 +455,14 @@ public sealed class CaptureService : IDisposable
         {
             Flow = flow;
             Parser = new BdoLootParser(profile);
+            GatheringParser = new BdoGatheringParser();
         }
 
         public FlowKey Flow { get; }
         public DateTime LastPayloadUtc { get; set; } = DateTime.UtcNow;
         public TcpStreamReassembler Reassembler { get; } = new();
         public BdoLootParser Parser { get; }
+        public BdoGatheringParser GatheringParser { get; }
     }
 
     private sealed class TcpStreamReassembler
@@ -499,6 +558,179 @@ public sealed class CaptureService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Dedicated Gathering result parser discovered from gather.pcapng
+    /// (2026-09-28). Gathering does not use the calibrated mob Ground Loot
+    /// packet family. A gather action arrives as a compact result-list packet:
+    ///
+    ///   length:      3-byte little-endian at +0
+    ///   signature:   93 14 01 at +3
+    ///   header:      15 bytes
+    ///   entry size:  222 bytes
+    ///   item id:     entry +0  (uint32 LE)
+    ///   quantity:    entry +4  (uint64 LE)
+    ///
+    /// Observed packet lengths were exactly 237, 459 and 903 bytes
+    /// (1, 2 and 4 results). Keeping this parser separate prevents gathering
+    /// support from changing or weakening the proven Ground Loot calibration.
+    /// </summary>
+    private sealed class BdoGatheringParser
+    {
+        private static readonly byte[] Signature = { 0x93, 0x14, 0x01 };
+        private const int SignatureOffset = 3;
+        private const int HeaderLength = 15;
+        private const int EntryLength = 222;
+        private const int MinimumPacketLength = HeaderLength + EntryLength;
+        private const int MaximumEntries = 32;
+        private const uint MaxReasonableItemId = 10_000_000;
+        private const ulong MaxReasonableQuantity = 10_000_000UL;
+
+        private readonly List<byte> _buffer = new();
+
+        public event Action<uint, ulong>? LootReceived;
+
+        public void Push(byte[] data)
+        {
+            if (data.Length == 0)
+                return;
+
+            _buffer.AddRange(data);
+            ProcessBuffer();
+        }
+
+        private void ProcessBuffer()
+        {
+            while (true)
+            {
+                int signaturePosition = FindSignature();
+                if (signaturePosition < 0)
+                {
+                    TrimWhenNoSignature();
+                    return;
+                }
+
+                int packetStart = signaturePosition - SignatureOffset;
+                if (packetStart < 0)
+                {
+                    RemovePrefix(signaturePosition + 1);
+                    continue;
+                }
+
+                if (packetStart > 0)
+                    RemovePrefix(packetStart);
+
+                if (_buffer.Count < MinimumPacketLength)
+                    return;
+
+                int packetLength = ReadPacketLength();
+                if (packetLength < MinimumPacketLength ||
+                    packetLength > HeaderLength + EntryLength * MaximumEntries ||
+                    (packetLength - HeaderLength) % EntryLength != 0)
+                {
+                    // Signature-like bytes inside an unrelated BDO packet.
+                    RemovePrefix(1);
+                    continue;
+                }
+
+                if (_buffer.Count < packetLength)
+                    return;
+
+                int entryCount = (packetLength - HeaderLength) / EntryLength;
+                if (entryCount < 1 || entryCount > MaximumEntries)
+                {
+                    RemovePrefix(packetLength);
+                    continue;
+                }
+
+                var span = CollectionsMarshal.AsSpan(_buffer);
+                var parsed = new List<(uint ItemId, ulong Quantity)>(entryCount);
+                bool valid = true;
+
+                for (int i = 0; i < entryCount; i++)
+                {
+                    int entryOffset = HeaderLength + i * EntryLength;
+                    uint itemId = BinaryPrimitives.ReadUInt32LittleEndian(
+                        span.Slice(entryOffset, 4));
+                    ulong quantity = BinaryPrimitives.ReadUInt64LittleEndian(
+                        span.Slice(entryOffset + 4, 8));
+
+                    if (itemId == 0 || itemId > MaxReasonableItemId ||
+                        quantity == 0 || quantity > MaxReasonableQuantity)
+                    {
+                        valid = false;
+                        break;
+                    }
+
+                    parsed.Add((itemId, quantity));
+                }
+
+                if (valid)
+                {
+                    foreach ((uint itemId, ulong quantity) in parsed)
+                        LootReceived?.Invoke(itemId, quantity);
+                }
+
+                RemovePrefix(packetLength);
+            }
+        }
+
+        private int FindSignature()
+        {
+            if (_buffer.Count < Signature.Length)
+                return -1;
+
+            for (int i = 0; i <= _buffer.Count - Signature.Length; i++)
+            {
+                bool match = true;
+                for (int j = 0; j < Signature.Length; j++)
+                {
+                    if (_buffer[i + j] == Signature[j])
+                        continue;
+
+                    match = false;
+                    break;
+                }
+
+                if (match)
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private int ReadPacketLength()
+        {
+            if (_buffer.Count < 3)
+                return 0;
+
+            return _buffer[0] |
+                   (_buffer[1] << 8) |
+                   (_buffer[2] << 16);
+        }
+
+        private void TrimWhenNoSignature()
+        {
+            // Keep enough trailing bytes for a split [length][signature] sequence.
+            int keep = SignatureOffset + Signature.Length - 1;
+            if (_buffer.Count > keep)
+                RemovePrefix(_buffer.Count - keep);
+        }
+
+        private void RemovePrefix(int count)
+        {
+            if (count <= 0)
+                return;
+
+            if (count >= _buffer.Count)
+            {
+                _buffer.Clear();
+                return;
+            }
+
+            _buffer.RemoveRange(0, count);
+        }
+    }
+
     private sealed class BdoLootParser
     {
         private readonly ParserProfile _profile;
@@ -533,6 +765,7 @@ public sealed class CaptureService : IDisposable
         }
 
         public event Action<uint, ulong>? LootReceived;
+        public event Action<uint, ulong>? NonGroundInventoryCandidate;
         public event Action<uint, ulong>? TransferSuppressed;
 
         public void Push(byte[] data)
@@ -590,14 +823,6 @@ public sealed class CaptureService : IDisposable
                 if (_buffer.Count < packetLength)
                     return;
 
-                if (_profile.GroundLootOnly && !MatchesGroundLoot(packetLength))
-                {
-                    // It is a valid inventory-add shaped packet, but not the
-                    // calibrated ground-loot subtype (Storage/Market/Maid/etc.).
-                    RemovePrefix(packetLength);
-                    continue;
-                }
-
                 uint itemId = BinaryPrimitives.ReadUInt32LittleEndian(
                     CollectionsMarshal.AsSpan(_buffer).Slice(_profile.ItemIdOffset, 4));
                 ulong quantity = BinaryPrimitives.ReadUInt64LittleEndian(
@@ -606,6 +831,20 @@ public sealed class CaptureService : IDisposable
                 bool reasonable =
                     itemId > 0 && itemId <= _profile.MaxReasonableItemId &&
                     quantity > 0 && quantity <= _profile.MaxReasonableQuantity;
+
+                if (_profile.GroundLootOnly && !MatchesGroundLoot(packetLength))
+                {
+                    // Gathering can use the same inventory-add packet family while
+                    // carrying a different subtype/fingerprint from mob ground loot.
+                    // Do not count it here. Surface only the parsed candidate and let
+                    // MainWindow accept it when the Item ID/name is gathering evidence.
+                    // Storage/Market/Maid candidates therefore remain rejected by default.
+                    if (reasonable)
+                        NonGroundInventoryCandidate?.Invoke(itemId, quantity);
+
+                    RemovePrefix(packetLength);
+                    continue;
+                }
 
                 if (reasonable)
                 {

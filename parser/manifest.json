@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "latestProfileVersion": "EU-2026.09.10.3",
+  "latestProfileVersion": "EU-2026.09.18.4",
   "profileUrl": "https://raw.githubusercontent.com/Shoki697/BDOLootTracker/main/parser/eu-current.json",
-  "profileSha256": "8a5d672492a4bd61ae70661cf8c262982841315431cef8e14c85f93da618f852",
+  "profileSha256": "7a2c382389ba4d2b6c286b99e9ddbf6a38ca1aea9fc43fe3ed938ca8325e3f47",
   "sampleVersion": "",
   "sampleUrl": "",
   "sampleSha256": "",
-  "notes": "Ground-Loot-only baseline. Only packets matching the calibrated Ground Loot fingerprint are accepted; no Storage/Market transfer suppression markers are required."
+  "notes": "Wireshark-verified EU ground-loot profile after the 2026-09-17/18 patch: CF 18 01, item +33, quantity +37, shifted ground-loot checks +54/+137."
 }

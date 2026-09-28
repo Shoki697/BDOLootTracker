@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Garmoth Upload"
         Width="740"
-        Height="690"
+        Height="750"
         MinWidth="650"
-        MinHeight="560"
+        MinHeight="620"
         Background="{StaticResource Bg}"
         Foreground="{StaticResource Text}"
         WindowStyle="None"
@@ -56,11 +56,27 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="SpotText" FontSize="19" FontWeight="SemiBold" />
+                            <TextBlock Text="GRIND SPOT" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
                             <TextBlock x:Name="UploadStateText" Grid.Column="1" VerticalAlignment="Center"
                                        Foreground="{StaticResource Green}" FontWeight="SemiBold" Margin="12,0,0,0" />
                         </Grid>
-                        <TextBlock x:Name="SessionMetaText" Foreground="{StaticResource Muted}" Margin="0,3,0,0" />
+                        <ComboBox x:Name="SpotComboBox"
+                                  ItemsSource="{Binding UploadSpotOptionsView}"
+                                  SelectedItem="{Binding SelectedUploadSpot, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  Text="{Binding UploadSpotSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  DisplayMemberPath="Name"
+                                  TextSearch.TextPath="Name"
+                                  IsTextSearchEnabled="True"
+                                  IsEditable="True"
+                                  StaysOpenOnEdit="True"
+                                  PreviewTextInput="SpotComboBox_PreviewTextInput"
+                                  KeyUp="SpotComboBox_KeyUp"
+                                  Height="31"
+                                  Margin="0,5,0,0"
+                                  VerticalContentAlignment="Center"
+                                  ToolTip="Type any part of a Garmoth spot name to filter the list." />
+                        <TextBlock x:Name="SpotHintText" Foreground="{StaticResource Muted}" Margin="0,4,0,0" FontSize="9.5" TextWrapping="Wrap" />
+                        <TextBlock x:Name="SessionMetaText" Foreground="{StaticResource Muted}" Margin="0,7,0,0" />
                         <TextBlock x:Name="AlreadyUploadedText"
                                    Visibility="Collapsed"
                                    Foreground="#FBBF24"

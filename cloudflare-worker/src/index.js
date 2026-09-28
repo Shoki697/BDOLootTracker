@@ -288,7 +288,7 @@ function validateProfile(profile, requireGroundLootOnly = false) {
 
 async function fetchOfficialSnapshot() {
   const manifestResponse = await fetch(OFFICIAL_MANIFEST_URL, {
-    headers: { "User-Agent": "BDOLootTracker-CommunityParser-Worker/0.12.7" },
+    headers: { "User-Agent": "BDOLootTracker-CommunityParser-Worker/0.13.0" },
     cf: { cacheTtl: 0, cacheEverything: false },
   });
   if (!manifestResponse.ok) throw new Error(`manifest HTTP ${manifestResponse.status}`);
@@ -306,7 +306,7 @@ async function fetchOfficialSnapshot() {
   }
 
   const profileResponse = await fetch(manifest.profileUrl, {
-    headers: { "User-Agent": "BDOLootTracker-CommunityParser-Worker/0.12.7" },
+    headers: { "User-Agent": "BDOLootTracker-CommunityParser-Worker/0.13.0" },
     cf: { cacheTtl: 0, cacheEverything: false },
   });
   if (!profileResponse.ok) throw new Error(`profile HTTP ${profileResponse.status}`);

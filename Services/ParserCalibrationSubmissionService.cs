@@ -22,7 +22,7 @@ public sealed class ParserCalibrationSubmissionService : IDisposable
         {
             Timeout = TimeSpan.FromSeconds(12)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("BDOLootTracker-CommunityParser/0.12.7");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("BDOLootTracker-CommunityParser/0.13.0");
     }
 
     public static string CurrentAppVersion
@@ -31,7 +31,7 @@ public sealed class ParserCalibrationSubmissionService : IDisposable
         {
             Version? version = Assembly.GetEntryAssembly()?.GetName().Version;
             if (version == null)
-                return "0.12.7";
+                return "0.13.0";
 
             return $"{version.Major}.{version.Minor}.{version.Build}";
         }

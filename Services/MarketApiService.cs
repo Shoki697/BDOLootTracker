@@ -79,6 +79,11 @@ public sealed class MarketApiService
         JsonElement root = document.RootElement;
 
         var inlineSpotBuffer = new List<GrindSpotRecord>();
+
+        // First parse the exact external Garmoth shape used by public OCR trackers:
+        // root.spots[spotId].name + root.spots[spotId].items/drops[].main_key.
+        // Keep the generic recursive parser as a supplement for API aliases/wrappers.
+        ParseExternalSpotMap(root, inlineSpotBuffer);
         ParseSpotCollection(root, inlineSpotBuffer, null);
         _inlineSpots = NormalizeSpotRecords(inlineSpotBuffer);
 
@@ -179,6 +184,7 @@ public sealed class MarketApiService
             string json = await GetSpotReferenceWithRetryAsync(cancellationToken);
 
             using JsonDocument document = JsonDocument.Parse(json);
+            ParseExternalSpotMap(document.RootElement, dedicated);
             ParseSpotCollection(document.RootElement, dedicated, null);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -190,11 +196,12 @@ public sealed class MarketApiService
         var merged = NormalizeSpotRecords(_inlineSpots.Concat(dedicated));
         merged = EnsureSeaMonsterSpot(merged);
 
-        if (merged.Count >= 10)
+        int linkCount = merged.Sum(x => x.ItemIds.Where(id => id > 0).Distinct().Count());
+        if (merged.Count >= 40 && linkCount >= 60)
             return merged;
 
         throw new InvalidDataException(
-            $"The Garmoth grind spot reference returned suspiciously few usable spots ({merged.Count}). " +
+            $"The Garmoth grind spot reference returned suspiciously few usable mappings ({merged.Count} spots / {linkCount} item links). " +
             "The existing local spot database will not be overwritten.");
     }
 
@@ -241,8 +248,13 @@ public sealed class MarketApiService
 
     private static List<GrindSpotRecord> NormalizeSpotRecords(IEnumerable<GrindSpotRecord> spots)
     {
+        // Keep the complete Garmoth spot catalog, even when a spot currently has
+        // no usable spot -> item mapping. Those entries are still valuable for the
+        // manual Session spot selector (and cover gathering / life-skill style
+        // locations that cannot be identified reliably from combat trash loot).
         return spots
-            .Where(x => !string.IsNullOrWhiteSpace(x.Name) && x.ItemIds.Count > 0)
+            .Where(x => !string.IsNullOrWhiteSpace(x.Name) &&
+                        !string.IsNullOrWhiteSpace(x.SpotKey))
             .GroupBy(x => x.SpotKey, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
@@ -250,8 +262,14 @@ public sealed class MarketApiService
                 return new GrindSpotRecord
                 {
                     SpotKey = first.SpotKey,
-                    Name = first.Name,
-                    ItemIds = group.SelectMany(x => x.ItemIds).Distinct().ToArray()
+                    Name = group
+                        .Select(x => x.Name)
+                        .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))
+                        ?? first.Name,
+                    ItemIds = group.SelectMany(x => x.ItemIds ?? Array.Empty<uint>())
+                        .Where(x => x > 0)
+                        .Distinct()
+                        .ToArray()
                 };
             })
             .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
@@ -321,6 +339,58 @@ public sealed class MarketApiService
         }
 
         throw lastException ?? new HttpRequestException("Unknown Garmoth grind spot API error.");
+    }
+
+    private static void ParseExternalSpotMap(JsonElement root, List<GrindSpotRecord> output)
+    {
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("spots", out JsonElement spots) ||
+            spots.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        foreach (JsonProperty property in spots.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.Object)
+                continue;
+
+            JsonElement info = property.Value;
+            string name = ReadFirstString(info, "name", "spot_name", "spotName", "title", "label");
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+
+            JsonElement dropContainer = default;
+            bool hasDrops = false;
+            foreach (string propertyName in new[]
+                     {
+                         "items", "drops", "products", "rewards",
+                         "loot", "loot_items", "lootItems", "resources", "materials"
+                     })
+            {
+                if (info.TryGetProperty(propertyName, out dropContainer) &&
+                    dropContainer.ValueKind is JsonValueKind.Array or JsonValueKind.Object)
+                {
+                    hasDrops = true;
+                    break;
+                }
+            }
+
+            var itemIds = new HashSet<uint>();
+            if (hasDrops)
+                ExtractItemIds(dropContainer, itemIds);
+
+            string key = ReadFirstString(info, "id", "spot_id", "spotId", "key", "slug");
+            if (string.IsNullOrWhiteSpace(key))
+                key = property.Name;
+
+            output.Add(new GrindSpotRecord
+            {
+                SpotKey = key.Trim(),
+                Name = name.Trim(),
+                ItemIds = itemIds.ToArray()
+            });
+        }
     }
 
     private static void ParseSpotCollection(
@@ -393,15 +463,6 @@ public sealed class MarketApiService
             return false;
 
         string name = ReadFirstString(element, "name", "spot_name", "spotName", "title", "label", "zone_name", "zoneName");
-        if (string.IsNullOrWhiteSpace(name) &&
-            !string.IsNullOrWhiteSpace(fallbackKey) &&
-            fallbackKey.Any(char.IsLetter))
-        {
-            name = fallbackKey.Replace('_', ' ').Replace('-', ' ').Trim();
-        }
-
-        if (string.IsNullOrWhiteSpace(name))
-            return false;
 
         JsonElement dropContainer = default;
         bool hasDrops = false;
@@ -409,7 +470,8 @@ public sealed class MarketApiService
                  {
                      "drops", "drop", "items", "loot", "loot_items", "lootItems",
                      "drop_items", "dropItems", "drop_list", "dropList",
-                     "item_list", "itemList", "item_keys", "itemKeys"
+                     "item_list", "itemList", "item_keys", "itemKeys",
+                     "products", "rewards"
                  })
         {
             if (element.TryGetProperty(propertyName, out dropContainer) &&
@@ -420,14 +482,25 @@ public sealed class MarketApiService
             }
         }
 
-        if (!hasDrops)
+        if (string.IsNullOrWhiteSpace(name) &&
+            hasDrops &&
+            !string.IsNullOrWhiteSpace(fallbackKey) &&
+            fallbackKey.Any(char.IsLetter))
+        {
+            // Backward compatibility for dictionary-shaped feeds keyed by spot name.
+            name = fallbackKey.Replace('_', ' ').Replace('-', ' ').Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
             return false;
 
         var itemIds = new HashSet<uint>();
-        ExtractItemIds(dropContainer, itemIds);
-        if (itemIds.Count == 0)
-            return false;
+        if (hasDrops)
+            ExtractItemIds(dropContainer, itemIds);
 
+        // The dedicated Garmoth spot endpoint contains useful catalog entries that
+        // do not always expose a drop list in the same shape as the grind-loot feed.
+        // Keep named spot records anyway so Sessions can be assigned manually.
         string key = ReadFirstString(element, "id", "spot_id", "spotId", "key", "slug");
         if (string.IsNullOrWhiteSpace(key))
             key = fallbackKey;
@@ -458,7 +531,12 @@ public sealed class MarketApiService
                 bool directFound = false;
                 foreach (string propertyName in new[]
                          {
-                             "main_key", "mainKey", "item_id", "itemId", "item_key", "itemKey", "mainkey"
+                             "main_key", "mainKey", "item_id", "itemId", "item_key", "itemKey", "mainkey",
+                             // Inside a confirmed item/product collection a plain `id`
+                             // is an item identifier in several Garmoth-compatible
+                             // lifeskill feeds. It is intentionally not read from the
+                             // spot root, so a spot id cannot be mistaken for loot.
+                             "id", "product_id", "productId", "resource_id", "resourceId"
                          })
                 {
                     if (!element.TryGetProperty(propertyName, out JsonElement value))

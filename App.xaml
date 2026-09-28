@@ -227,6 +227,29 @@
                                 </Border>
                             </ToggleButton>
 
+                            <!--
+                                Editable ComboBox support. The previous custom dark ComboBox
+                                template did not expose PART_EditableTextBox, therefore
+                                IsEditable="True" still behaved like a read-only selector.
+                                Keep this editor above the full-width ToggleButton and leave
+                                the arrow column clickable. ComboBox wires its Text property
+                                to this named template part automatically.
+                            -->
+                            <TextBox x:Name="PART_EditableTextBox"
+                                     Style="{x:Null}"
+                                     Visibility="Collapsed"
+                                     Margin="10,1,40,1"
+                                     Padding="0"
+                                     Background="{TemplateBinding Background}"
+                                     Foreground="{TemplateBinding Foreground}"
+                                     CaretBrush="White"
+                                     SelectionBrush="{StaticResource Accent}"
+                                     BorderThickness="0"
+                                     IsReadOnly="{TemplateBinding IsReadOnly}"
+                                     HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                     VerticalContentAlignment="Center"
+                                     Focusable="True" />
+
                             <Popup x:Name="PART_Popup"
                                    Placement="Bottom"
                                    IsOpen="{TemplateBinding IsDropDownOpen}"
@@ -251,6 +274,11 @@
 
                         <ControlTemplate.Triggers>
                             <!-- Szándékosan nincs IsMouseOver trigger. -->
+                            <Trigger Property="IsEditable" Value="True">
+                                <Setter TargetName="PART_EditableTextBox"
+                                        Property="Visibility"
+                                        Value="Visible" />
+                            </Trigger>
                             <Trigger Property="IsKeyboardFocusWithin" Value="True">
                                 <Setter TargetName="OuterBorder"
                                         Property="BorderBrush"

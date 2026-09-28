@@ -107,8 +107,11 @@ public sealed class ParserCalibrationService : IDisposable
             return MobCalibrationResult.Failed("No TCP payload was captured. Check the selected network adapter and try again.");
 
         var known = new HashSet<uint>(knownItemIds.Where(x => x > 0));
-        // Silver and Black Stone are useful anchors even if the local Garmoth DB is stale.
-        known.Add(1);
+        // Black Stone is a safe universal loot anchor. Silver (item id 1) is
+        // deliberately NOT forced into discovery: the literal value 1 occurs in
+        // many unrelated BDO packet fields and can dominate a short calibration
+        // with hundreds of false candidates.
+        known.Remove(1);
         known.Add(BlackStoneItemId);
 
         byte[] seedSignature = ParserProfileService.ParseHex(seed.Signature);
@@ -136,6 +139,12 @@ public sealed class ParserCalibrationService : IDisposable
                 quantityDeltaMax: 12);
         }
 
+        // Guided calibration asks for roughly 10-20 loot events. A candidate
+        // occurring hundreds of times in that short window is packet-state noise,
+        // not the ground-loot family. Keep a generous ceiling for multi-item drops
+        // while preventing a 500+ occurrence false layout from outranking the real one.
+        const int MaxPlausibleGuidedSamples = 128;
+
         var ranked = candidates
             .Select(x => new
             {
@@ -145,6 +154,7 @@ public sealed class ParserCalibrationService : IDisposable
                 MinPacketLength = x.Value.MinimumPacketLength,
                 Stat = x.Value
             })
+            .Where(x => x.Count <= MaxPlausibleGuidedSamples)
             .OrderByDescending(x => x.Count)
             .ThenByDescending(x => x.ItemCount)
             .ToArray();

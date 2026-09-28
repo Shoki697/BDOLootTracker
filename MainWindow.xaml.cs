@@ -107,6 +107,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly Dictionary<uint, ulong> _sessionLoot = new();
     private HashSet<uint> _ignoredItemIds = new();
     private HashSet<uint> _garmothKnownItemIds = new();
+    private HashSet<uint> _gatheringKnownItemIds = new();
+    private readonly Dictionary<(uint ItemId, ulong Quantity), DateTime> _recentGatheringCandidates = new();
+    private static readonly TimeSpan GatheringCandidateDuplicateWindow = TimeSpan.FromMilliseconds(1500);
+    private const ulong MaxSingleGatheringCandidateQuantity = 1000;
 
     private DateTime? _sessionStartedUtc;
     private DateTime? _activeSegmentStartedUtc;
@@ -117,9 +121,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private readonly Dictionary<string, double> _spotScores = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _spotNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HashSet<uint>> _spotEvidenceItemIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> _spotScoredItemIds = new();
     private string _detectedSpotKey = string.Empty;
     private string _detectedSpotName = string.Empty;
+
+    private const string GatheringPseudoSpotKey = "__gathering__";
+    private const string GatheringPseudoSpotName = "Gathering";
 
     // Last-resort mappings for very new trash loot where Garmoth's drop list
     // can be newer than its spot -> item relationship data. Keep this list
@@ -304,6 +312,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ReloadGarmothLootFilter();
 
         _captureService.LootReceived += CaptureService_LootReceived;
+        _captureService.GatheringLootReceived += CaptureService_GatheringLootReceived;
+        _captureService.NonGroundInventoryCandidateReceived += CaptureService_NonGroundInventoryCandidateReceived;
         _captureService.StatusChanged += CaptureService_StatusChanged;
         _captureService.CaptureError += CaptureService_CaptureError;
 
@@ -737,7 +747,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             EnsureDatabaseServicesMatchSettings();
             ReloadIgnoredItems(applyToCurrentSession: false);
             ReloadGarmothLootFilter();
-
+    
             LootRows.Clear();
             NotifyLootOrderingChanged();
             _rowsById.Clear();
@@ -772,7 +782,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             ApplyClassToHeader(selectedClass, spec);
-            HeaderSpotText = "Detecting grind spot...";
+            HeaderSpotText = "Detecting spot...";
 
             _sessionId = _database.BeginSession(
                 _settings.Region,
@@ -1021,20 +1031,95 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         });
     }
 
-    private void AddLoot(uint itemId, ulong quantity)
+    private void CaptureService_GatheringLootReceived(uint itemId, ulong quantity)
+        => HandleGatheringLootCandidate(itemId, quantity, confirmedGatheringPacket: true);
+
+    private void CaptureService_NonGroundInventoryCandidateReceived(uint itemId, ulong quantity)
+        => HandleGatheringLootCandidate(itemId, quantity, confirmedGatheringPacket: false);
+
+    private void HandleGatheringLootCandidate(
+        uint itemId,
+        ulong quantity,
+        bool confirmedGatheringPacket)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_sessionStartedUtc == null || _isSessionPaused)
+                return;
+
+            // A real single gathering action produces small deltas. This prevents a
+            // bulk Storage/Maid movement of a gathering material from becoming a
+            // gathering session through the generic inventory-candidate fallback.
+            if (quantity == 0 || quantity > MaxSingleGatheringCandidateQuantity)
+                return;
+
+            if (_ignoredItemIds.Contains(itemId))
+                return;
+
+            ItemDefinition item = _database.GetItem(itemId, _settings.Region, _settings.ItemLanguage);
+
+            // The dedicated 93 14 01 result packet is itself proof that the item came
+            // from Gathering, so it must not depend on Garmoth's spot/item mappings.
+            // The older non-ground fallback remains conservative and still requires
+            // item/name gathering evidence.
+            if (!confirmedGatheringPacket && !IsGatheringEvidence(itemId, item.Name))
+                return;
+
+            DateTime now = DateTime.UtcNow;
+            var key = (itemId, quantity);
+            if (_recentGatheringCandidates.TryGetValue(key, out DateTime lastSeen) &&
+                now - lastSeen <= GatheringCandidateDuplicateWindow)
+            {
+                return;
+            }
+
+            _recentGatheringCandidates[key] = now;
+            foreach (var stale in _recentGatheringCandidates
+                         .Where(x => now - x.Value > GatheringCandidateDuplicateWindow)
+                         .Select(x => x.Key)
+                         .ToArray())
+            {
+                _recentGatheringCandidates.Remove(stale);
+            }
+
+            AddLoot(itemId, quantity, forceGatheringEvidence: true, preloadedItem: item);
+        });
+    }
+
+    private void AddLoot(
+        uint itemId,
+        ulong quantity,
+        bool forceGatheringEvidence = false,
+        ItemDefinition? preloadedItem = null)
     {
         if (_sessionStartedUtc == null || _isSessionPaused)
             return;
 
-        // User-managed ignore list: ezek az ID-k már a sessionbe sem kerülnek be.
+        // User-managed ignore list: these IDs never enter the session.
         if (_ignoredItemIds.Contains(itemId))
             return;
 
-        // Optional Garmoth-only filter. If the local drop cache is unavailable,
-        // fail open rather than silently losing an entire session.
+        // Resolve metadata BEFORE the optional Garmoth filter. Gathering acquisitions
+        // can arrive through a non-ground inventory-add subtype and some lifeskill
+        // materials can lag behind the generic Garmoth loot cache. We still need the
+        // item identity in order to classify the session as Gathering safely.
+        ItemDefinition item = preloadedItem ??
+            _database.GetItem(itemId, _settings.Region, _settings.ItemLanguage);
+
+        bool gatheringEvidence =
+            forceGatheringEvidence ||
+            IsGatheringEvidence(itemId, item.Name);
+
+        if (gatheringEvidence)
+            ApplyGatheringCategoryIfAllowed();
+
+        // Optional live-loot filter. Ground-loot recognition remains independent from
+        // Garmoth. Strong gathering evidence is allowed through even when the generic
+        // Garmoth drop cache does not contain that lifeskill item yet.
         if (_settings.OnlyTrackGarmothItems &&
             _garmothKnownItemIds.Count > 0 &&
-            !_garmothKnownItemIds.Contains(itemId))
+            !_garmothKnownItemIds.Contains(itemId) &&
+            !gatheringEvidence)
         {
             return;
         }
@@ -1044,8 +1129,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (!_rowsById.TryGetValue(itemId, out var row))
         {
-            var item = _database.GetItem(itemId, _settings.Region, _settings.ItemLanguage);
-
             row = new LootRowViewModel
             {
                 ItemId = item.ItemId,
@@ -1067,8 +1150,61 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         row.Quantity += quantity;
         row.LastLootedUtc = DateTime.UtcNow;
         NotifyLootOrderingChanged();
-        EvaluateSpotDetection(itemId, row.IsTrash);
+        EvaluateSpotDetection(itemId, row.IsTrash, gatheringEvidence);
         RefreshMetrics();
+    }
+
+    private bool IsGatheringEvidence(uint itemId, string? itemName)
+    {
+        if (_gatheringKnownItemIds.Contains(itemId))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(itemName))
+            return false;
+
+        string name = itemName.Trim();
+
+        // Strong gathering by-products. These are useful even when Garmoth's
+        // spot -> item relationship endpoint is incomplete for lifeskill spots.
+        if (name.Equals("Fairy's Breath", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("Fairy Powder", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("Red Tree Lump", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("Monk's Branch", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("Old Tree Bark", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("Spirit's Leaf", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("Bloody Tree Knot", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Generic resource names used across Garmoth gathering/lifeskill spots.
+        // Concrete combat trash detection always has priority and can replace the
+        // broad Gathering pseudo-spot later in the same session.
+        string[] suffixes =
+        {
+            " Sap", " Timber", " Log", " Ore", " Rough Stone",
+            " Hide", " Leather", " Blood", " Meat", " Feather",
+            " Herb", " Grass", " Flower", " Mushroom", " Truffle",
+            " Branch", " Bark"
+        };
+
+        if (suffixes.Any(suffix => name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        if (name.StartsWith("Fruit of ", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private void ApplyGatheringCategoryIfAllowed()
+    {
+        bool hasConcreteCombatSpot =
+            !string.IsNullOrWhiteSpace(_detectedSpotKey) &&
+            !string.Equals(_detectedSpotKey, GatheringPseudoSpotKey, StringComparison.OrdinalIgnoreCase);
+
+        if (!hasConcreteCombatSpot)
+            ApplyDetectedSpot(GatheringPseudoSpotKey, GatheringPseudoSpotName);
     }
 
     private async Task EnsureRowIconAsync(LootRowViewModel row)
@@ -1320,6 +1456,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 Owner = this
             };
 
+            _isGarmothUploading = true;
+            UpdateGarmothUploadButtonState();
+
             preview.ShowDialog();
             if (preview.UploadedSuccessfully)
                 StatusText = "Session uploaded to Garmoth successfully";
@@ -1330,6 +1469,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         finally
         {
+            _isGarmothUploading = false;
             UpdateGarmothUploadButtonState();
         }
     }
@@ -1443,11 +1583,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            _garmothKnownItemIds = _database.GetGarmothKnownLootItemIds();
+            _garmothKnownItemIds = _database.GetGarmothKnownLootItemIds(_settings.Region);
         }
         catch
         {
+            // Fail open. A missing/stale local Garmoth cache should not suppress all loot.
             _garmothKnownItemIds = new HashSet<uint>();
+        }
+
+        try
+        {
+            // Gathering detection is intentionally only a broad category detector.
+            // The exact Garmoth lifeskill spot is selected by the user later.
+            _gatheringKnownItemIds = _database.GetGatheringLootItemIds();
+        }
+        catch
+        {
+            _gatheringKnownItemIds = new HashSet<uint>();
         }
     }
 
@@ -1542,17 +1694,33 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ResetSpotDetection()
     {
+        _recentGatheringCandidates.Clear();
         _spotScores.Clear();
         _spotNames.Clear();
+        _spotEvidenceItemIds.Clear();
         _spotScoredItemIds.Clear();
         _detectedSpotKey = string.Empty;
         _detectedSpotName = string.Empty;
-        HeaderSpotText = "Detecting grind spot...";
+        HeaderSpotText = "Detecting spot...";
     }
 
-    private void EvaluateSpotDetection(uint itemId, bool isTrash)
+    private void EvaluateSpotDetection(uint itemId, bool isTrash, bool gatheringEvidence)
     {
-        if (_sessionStartedUtc == null || !_spotScoredItemIds.Add(itemId))
+        if (_sessionStartedUtc == null)
+            return;
+
+        // Gathering is deliberately treated as one broad pseudo-spot. Gathering
+        // materials overlap too heavily between Garmoth lifeskill locations to make
+        // exact automatic location detection trustworthy. Once a gathering-only
+        // material is seen, mark the session as Gathering and let the user choose the
+        // exact Garmoth spot from Session History / the upload review dialog.
+        if (gatheringEvidence)
+        {
+            ApplyGatheringCategoryIfAllowed();
+            return;
+        }
+
+        if (!_spotScoredItemIds.Add(itemId))
             return;
 
         IReadOnlyList<SpotCandidate> candidates;
@@ -1567,27 +1735,65 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         if (candidates.Count == 0)
         {
-            // Some brand-new grind zones appear in the Garmoth drops database
-            // before the spot relationship feed catches up. Only use a built-in
-            // fallback for known UNIQUE trash items; never infer a spot from a
-            // common item such as Black Stone or Caphras Stone.
+            // Some brand-new grind zones appear in Garmoth's generic drops catalog
+            // before the separate spot -> item relationship feed catches up.
             if (isTrash && KnownTrashSpotFallbacks.TryGetValue(itemId, out var fallback))
                 ApplyDetectedSpot(fallback.Key, fallback.Name);
 
             return;
         }
 
-        // Trash items are strong identifiers. Shared/common drops only contribute
-        // a small amount so Black Stone / Caphras alone cannot choose a spot.
-        double weight = isTrash
-            ? (candidates.Count == 1 ? 120.0 : 55.0)
-            : (candidates.Count == 1 ? 12.0 : 2.0);
+        // An item mapped by Garmoth to exactly one grind spot is a strong location
+        // signature even when its trash flag is temporarily missing/stale. This is
+        // similar to the public OCR trackers' "spot signature" idea, but packet ItemId
+        // lets us use exact IDs instead of fuzzy OCR names.
+        if (candidates.Count == 1)
+        {
+            SpotCandidate unique = candidates[0];
+            ApplyDetectedSpot(unique.SpotKey, unique.Name);
+            return;
+        }
 
-        foreach (var candidate in candidates)
+        // Shared trash drops are still useful evidence, but common drops must not
+        // force a location. Score by ambiguity so a 2-spot signature counts much
+        // more than an item that appears at a dozen spots.
+        double weight;
+        if (isTrash)
+        {
+            weight = candidates.Count switch
+            {
+                2 => 42.0,
+                3 => 28.0,
+                4 => 20.0,
+                <= 8 => 12.0,
+                _ => 5.0
+            };
+        }
+        else
+        {
+            weight = candidates.Count switch
+            {
+                2 => 14.0,
+                3 => 8.0,
+                4 => 5.0,
+                <= 8 => 2.0,
+                _ => 0.5
+            };
+        }
+
+        foreach (SpotCandidate candidate in candidates)
         {
             _spotNames[candidate.SpotKey] = candidate.Name;
             if (!_spotScores.TryAdd(candidate.SpotKey, weight))
                 _spotScores[candidate.SpotKey] += weight;
+
+            if (!_spotEvidenceItemIds.TryGetValue(candidate.SpotKey, out HashSet<uint>? evidence))
+            {
+                evidence = new HashSet<uint>();
+                _spotEvidenceItemIds[candidate.SpotKey] = evidence;
+            }
+
+            evidence.Add(itemId);
         }
 
         var ordered = _spotScores
@@ -1601,10 +1807,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var best = ordered[0];
         double secondScore = ordered.Count > 1 ? ordered[1].Value : 0;
 
-        bool confident = best.Value >= 50 ||
-                         (best.Value >= 24 && best.Value - secondScore >= 12);
+        // Normal grind spots keep the proven combat confidence thresholds.
+        // Gathering is handled earlier as the broad pseudo-spot "Gathering" and
+        // never tries to guess an exact lifeskill location automatically.
+        bool combatConfident = best.Value >= 70 ||
+                               (best.Value >= 36 && best.Value - secondScore >= 18);
 
-        if (!confident)
+        if (!combatConfident)
             return;
 
         string bestName = _spotNames.TryGetValue(best.Key, out string? detectedName)

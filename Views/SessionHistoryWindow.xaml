@@ -27,7 +27,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="Session History" FontSize="26" FontWeight="SemiBold" />
-                <TextBlock Text="Browse sessions by grind spot, review loot, upload to Garmoth, or create a shareable session image."
+                <TextBlock Text="Browse sessions by spot, correct auto-detection from the Garmoth spot list, review loot, upload to Garmoth, or create a shareable session image."
                            Foreground="{StaticResource Muted}" Margin="0,4,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -97,7 +97,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="GRIND SPOTS" Foreground="{StaticResource Muted}" FontWeight="SemiBold" Margin="15,14,15,10" />
+                    <TextBlock Text="SPOTS" Foreground="{StaticResource Muted}" FontWeight="SemiBold" Margin="15,14,15,10" />
                     <ListBox x:Name="SpotList"
                              Grid.Row="1"
                              Background="Transparent"
@@ -262,6 +262,50 @@
                                                             <TextBlock Text="{Binding GarmothDetailText}" FontWeight="SemiBold" Margin="0,3,0,0" TextWrapping="Wrap" />
                                                         </StackPanel>
                                                     </Grid>
+
+                                                    <Border Background="#101A23"
+                                                            BorderBrush="{StaticResource Border}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="6"
+                                                            Padding="10"
+                                                            Margin="0,2,0,12">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="10" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="10" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel Grid.Column="0" VerticalAlignment="Center" MinWidth="118">
+                                                                <TextBlock Text="SESSION SPOT" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
+                                                                <TextBlock Text="{Binding SpotSelectorHint}" Foreground="{StaticResource Muted}" FontSize="9" Margin="0,3,0,0" />
+                                                            </StackPanel>
+                                                            <ComboBox Grid.Column="2"
+                                                                      ItemsSource="{Binding SpotOptionsView}"
+                                                                      SelectedItem="{Binding SelectedSpot, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                      Text="{Binding SpotEditText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                      DisplayMemberPath="Name"
+                                                                      TextSearch.TextPath="Name"
+                                                                      IsTextSearchEnabled="True"
+                                                                      IsEditable="True"
+                                                                      StaysOpenOnEdit="True"
+                                                                      PreviewTextInput="SpotComboBox_PreviewTextInput"
+                                                                      KeyUp="SpotComboBox_KeyUp"
+                                                                      IsEnabled="{Binding CanEditSpot}"
+                                                                      MinWidth="290"
+                                                                      Height="30"
+                                                                      VerticalContentAlignment="Center"
+                                                                      ToolTip="Only spots cached from Garmoth can be saved. Type to search the list." />
+                                                            <Button Grid.Column="4"
+                                                                    Content="Save Spot"
+                                                                    Height="30"
+                                                                    Padding="12,4"
+                                                                    IsEnabled="{Binding CanEditSpot}"
+                                                                    Click="SaveSpot_Click"
+                                                                    ToolTip="Save this Garmoth spot to the selected session." />
+                                                        </Grid>
+                                                    </Border>
 
                                                     <TextBlock Text="FULL LOOT" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" Margin="0,6,0,6" />
                                                     <ItemsControl ItemsSource="{Binding FullLoot}">

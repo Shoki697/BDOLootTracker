@@ -1,0 +1,1 @@
+import{t as e}from"./ResourceError-C6JULYWo.js";var t=e;export{t as errorComponent};

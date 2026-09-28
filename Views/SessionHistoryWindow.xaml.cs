@@ -5,6 +5,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Input;
+using System.Windows.Data;
 using BDOLootTracker.Models;
 using BDOLootTracker.Services;
 
@@ -18,6 +20,7 @@ public partial class SessionHistoryWindow : Window
     private readonly string _language;
     private readonly long _activeSessionId;
     private IReadOnlyList<SessionSummary> _allSessions = Array.Empty<SessionSummary>();
+    private IReadOnlyList<SpotCandidate> _garmothSpots = Array.Empty<SpotCandidate>();
     private bool _loaded;
     private bool _refreshing;
 
@@ -55,6 +58,7 @@ public partial class SessionHistoryWindow : Window
                 ?? string.Empty;
 
             _allSessions = _database.GetSessions(_language, HideIgnored, limit: 1000);
+            _garmothSpots = _database.GetAllGarmothSpots();
 
             var spots = new List<SpotFilterItem>
             {
@@ -111,7 +115,11 @@ public partial class SessionHistoryWindow : Window
                 preview = Array.Empty<SessionLootHistoryRow>();
             }
 
-            cards.Add(new SessionCardViewModel(session, preview, session.SessionId == _activeSessionId));
+            cards.Add(new SessionCardViewModel(
+                session,
+                preview,
+                session.SessionId == _activeSessionId,
+                _garmothSpots));
         }
 
         SessionCardsControl.ItemsSource = cards;
@@ -298,6 +306,72 @@ public partial class SessionHistoryWindow : Window
         catch (Exception ex)
         {
             AppDialog.Show(ex.Message, "Delete Session", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void SpotComboBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (sender is ComboBox combo && combo.IsEditable && combo.IsEnabled)
+            combo.IsDropDownOpen = true;
+    }
+
+    private void SpotComboBox_KeyUp(object sender, KeyEventArgs e)
+    {
+        if (sender is not ComboBox combo || !combo.IsEditable || !combo.IsEnabled)
+            return;
+
+        if (e.Key is Key.Escape or Key.Enter or Key.Tab)
+            return;
+
+        combo.IsDropDownOpen = true;
+    }
+
+    private void SaveSpot_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: SessionCardViewModel card })
+            return;
+
+        if (card.IsActive)
+        {
+            AppDialog.Show(
+                "Stop the active session before changing its spot. This prevents automatic detection from overwriting a manual selection.",
+                "Session Spot",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        SpotCandidate? selected = card.SelectedSpot;
+        string typedName = (card.SpotEditText ?? string.Empty).Trim();
+
+        if (selected == null ||
+            (!string.IsNullOrWhiteSpace(typedName) &&
+             !string.Equals(selected.Name, typedName, StringComparison.OrdinalIgnoreCase)))
+        {
+            selected = card.SpotOptions.FirstOrDefault(x =>
+                string.Equals(x.Name, typedName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (selected == null ||
+            string.IsNullOrWhiteSpace(selected.SpotKey) ||
+            string.IsNullOrWhiteSpace(selected.Name))
+        {
+            AppDialog.Show(
+                "Select an exact spot from the Garmoth list first. Custom/free-text spot names are not saved. If the list is empty or a new spot is missing, run Settings → Database & Loot → Fetch / Update.",
+                "Session Spot",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            _database.UpdateSessionSpot(card.Session.SessionId, selected.SpotKey, selected.Name);
+            LoadSessions((SpotList.SelectedItem as SpotFilterItem)?.Key);
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Show(ex.Message, "Session Spot", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -687,21 +761,125 @@ public partial class SessionHistoryWindow : Window
     {
         private bool _isExpanded;
         private IReadOnlyList<SessionLootHistoryRow> _fullLoot = Array.Empty<SessionLootHistoryRow>();
+        private SpotCandidate? _selectedSpot;
+        private string _spotEditText = string.Empty;
+        private bool _spotSearchActive;
 
         public SessionSummary Session { get; }
         public IReadOnlyList<SessionLootHistoryRow> PreviewLoot { get; }
+        public IReadOnlyList<SpotCandidate> SpotOptions { get; }
+        public ListCollectionView SpotOptionsView { get; }
         public bool IsActive { get; }
         public bool FullLootLoaded { get; private set; }
 
-        public SessionCardViewModel(SessionSummary session, IReadOnlyList<SessionLootHistoryRow> previewLoot, bool isActive)
+        public SessionCardViewModel(
+            SessionSummary session,
+            IReadOnlyList<SessionLootHistoryRow> previewLoot,
+            bool isActive,
+            IReadOnlyList<SpotCandidate> spotOptions)
         {
             Session = session;
             PreviewLoot = previewLoot;
             IsActive = isActive;
+            SpotOptions = spotOptions;
             DropRateEditText = session.DropRatePercent?.ToString() ?? string.Empty;
+
+            SpotOptionsView = new ListCollectionView(SpotOptions.ToList());
+            SpotOptionsView.Filter = SpotMatchesFilter;
+
+            bool gatheringCategoryDetected =
+                string.Equals(session.SpotKey, "__gathering__", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(session.SpotName, "Gathering", StringComparison.OrdinalIgnoreCase);
+
+            _selectedSpot = gatheringCategoryDetected
+                ? null
+                : SpotOptions.FirstOrDefault(x =>
+                    (!string.IsNullOrWhiteSpace(session.SpotKey) &&
+                     string.Equals(x.SpotKey, session.SpotKey, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(session.SpotName) &&
+                     string.Equals(x.Name, session.SpotName, StringComparison.OrdinalIgnoreCase)));
+
+            // A broad Gathering auto-detection is intentionally not an uploadable
+            // Garmoth spot. Leave the search field empty so the user can immediately
+            // type/select the real lifeskill location.
+            _spotEditText = gatheringCategoryDetected
+                ? string.Empty
+                : _selectedSpot?.Name
+                    ?? (!string.IsNullOrWhiteSpace(session.SpotName) ? session.SpotName : string.Empty);
+            _spotSearchActive = false;
         }
 
         public string DropRateEditText { get; set; }
+
+        public SpotCandidate? SelectedSpot
+        {
+            get => _selectedSpot;
+            set
+            {
+                if (ReferenceEquals(_selectedSpot, value))
+                    return;
+
+                _selectedSpot = value;
+                OnPropertyChanged();
+
+                if (value != null)
+                {
+                    _spotEditText = value.Name;
+                    _spotSearchActive = false;
+                    OnPropertyChanged(nameof(SpotEditText));
+                    SpotOptionsView.Refresh();
+                }
+            }
+        }
+
+        public string SpotEditText
+        {
+            get => _spotEditText;
+            set
+            {
+                value ??= string.Empty;
+                if (string.Equals(_spotEditText, value, StringComparison.Ordinal))
+                    return;
+
+                _spotEditText = value;
+                _spotSearchActive = true;
+
+                if (_selectedSpot != null &&
+                    !string.Equals(_selectedSpot.Name, value.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    _selectedSpot = null;
+                    OnPropertyChanged(nameof(SelectedSpot));
+                }
+
+                OnPropertyChanged();
+                SpotOptionsView.Refresh();
+            }
+        }
+
+        private bool SpotMatchesFilter(object item)
+        {
+            if (item is not SpotCandidate spot)
+                return false;
+
+            string query = (_spotEditText ?? string.Empty).Trim();
+            if (!_spotSearchActive || string.IsNullOrWhiteSpace(query))
+                return true;
+
+            if (spot.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            string normalizedQuery = NormalizeSpotSearch(query);
+            string normalizedName = NormalizeSpotSearch(spot.Name);
+            return normalizedQuery.Length > 0 && normalizedName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeSpotSearch(string value)
+            => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+        public bool CanEditSpot => !IsActive && SpotOptions.Count > 0;
+        public string SpotSelectorHint => SpotOptions.Count > 0
+            ? $"{SpotOptions.Count:N0} Garmoth spot(s) available"
+            : "No Garmoth spots cached — run Database Fetch / Update";
 
         public bool IsExpanded
         {

@@ -491,11 +491,29 @@ public partial class SettingsWindow : Window
 
         long accepted = _captureService.ValidLootCount;
         long suppressed = _captureService.SuppressedTransferCount;
+        long nonGroundCandidates = _captureService.NonGroundInventoryCandidateCount;
+        long gatheringPackets = _captureService.GatheringPacketLootCount;
+        long tcpBytes = _captureService.TcpPayloadBytesObserved;
+        long serverBytes = _captureService.ServerPayloadBytesReceived;
         string mode = _captureService.ExitLagModeEnabled ? "ExitLag" : "Standard";
 
-        if (accepted == 0 && suppressed == 0 && _captureService.ServerPayloadBytesReceived == 0)
+        if (accepted == 0 && suppressed == 0 && nonGroundCandidates == 0 && gatheringPackets == 0 && serverBytes == 0)
         {
-            CaptureDiagnosticsText.Text = $"Last capture mode: {mode} • no packet activity recorded yet.";
+            if (tcpBytes == 0)
+            {
+                CaptureDiagnosticsText.Text =
+                    $"Last capture mode: {mode} • no TCP payload captured. The selected adapter is likely not carrying the BDO connection.";
+            }
+            else if (_captureService.ExitLagModeEnabled)
+            {
+                CaptureDiagnosticsText.Text =
+                    $"Last capture: ExitLag • TCP payload observed {tcpBytes:N0} bytes, but no BDO relay has been identified yet.";
+            }
+            else
+            {
+                CaptureDiagnosticsText.Text =
+                    $"Last capture: Standard • TCP payload observed {tcpBytes:N0} bytes, but 0 bytes arrived from BDO server port {_captureService.ActiveServerPort}.";
+            }
             return;
         }
 
@@ -506,12 +524,12 @@ public partial class SettingsWindow : Window
                 : _captureService.ActiveExitLagRelay;
             CaptureDiagnosticsText.Text =
                 $"Last capture: ExitLag • relay {relay} • duplicate relay(s) {_captureService.DuplicateExitLagRelayCount:N0} • " +
-                $"accepted loot {accepted:N0} • suppressed transfer(s) {suppressed:N0}.";
+                $"accepted loot {accepted:N0} • gathering result item(s) {gatheringPackets:N0} • non-ground inventory candidate(s) {nonGroundCandidates:N0} • suppressed transfer(s) {suppressed:N0}.";
         }
         else
         {
             CaptureDiagnosticsText.Text =
-                $"Last capture: Standard • accepted loot {accepted:N0} • suppressed transfer(s) {suppressed:N0}.";
+                $"Last capture: Standard • accepted loot {accepted:N0} • gathering result item(s) {gatheringPackets:N0} • non-ground inventory candidate(s) {nonGroundCandidates:N0} • suppressed transfer(s) {suppressed:N0}.";
         }
     }
 
@@ -576,7 +594,7 @@ public partial class SettingsWindow : Window
         if (string.IsNullOrWhiteSpace(databasePath))
         {
             AppDialog.Show(
-                "Set the database path first. The Mob Loot calibration uses known Garmoth item IDs to validate the detected packet layout.",
+                "Set the database path first. Ground Loot calibration ignores the Garmoth-only display filter. It uses the proven narrow trusted-loot ID cache as packet-layout anchors to avoid false packet matches.",
                 "Manual Calibration",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -831,17 +849,22 @@ public partial class SettingsWindow : Window
             else if (health.MarketIsStale(MarketMaxAge))
                 warnings.Add($"{GetSelectedRegion()} loot/price data older than 7 days");
 
+            if (health.GrindSpotCount < 40 || health.GrindSpotDropLinkCount < 60)
+                warnings.Add("Garmoth grind-spot map incomplete");
+
             DatabaseStatusText.Text = warnings.Count == 0
                 ? "✓ Database is up to date"
                 : "⚠ Update recommended: " + string.Join(", ", warnings);
 
             string catalogText = health.CatalogUpdatedUtc?.ToLocalTime().ToString("yyyy.MM.dd HH:mm") ?? "never";
             string marketText = health.MarketUpdatedUtc?.ToLocalTime().ToString("yyyy.MM.dd HH:mm") ?? "never";
+            string spotsText = health.GrindSpotsUpdatedUtc?.ToLocalTime().ToString("yyyy.MM.dd HH:mm") ?? "never";
 
             DatabaseDetailsText.Text =
                 $"Items: {health.ItemCount:N0}  •  Selected-language names: {health.NameCount:N0}  •  " +
                 $"{GetSelectedRegion()} grind loot items: {health.MarketPriceCount:N0}  •  Icons cached: {health.CachedIconCount:N0}\n" +
-                $"Item DB: {catalogText}  •  Loot/Price DB: {marketText}";
+                $"Garmoth spot map: {health.GrindSpotCount:N0} spots / {health.GrindSpotDropLinkCount:N0} item links\n" +
+                $"Item DB: {catalogText}  •  Loot/Price DB: {marketText}  •  Spot map: {spotsText}";
         }
         catch (Exception ex)
         {
@@ -1031,7 +1054,6 @@ public partial class SettingsWindow : Window
         ClassCombo.IsEnabled = enabled;
         CharacterBox.IsEnabled = enabled;
         GarmothApiKeyBox.IsEnabled = enabled;
-        GarmothOnlyLootCheckBox.IsEnabled = enabled;
         OverlayModeCombo.IsEnabled = enabled;
         OverlayOpacitySlider.IsEnabled = enabled;
         OverlayMaxItemsBox.IsEnabled = enabled;

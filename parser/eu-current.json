@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "profileVersion": "EU-2026.09.10.3",
+  "profileVersion": "EU-2026.09.18.4",
   "region": "EU",
   "serverPort": 8889,
-  "signature": "6F 0D 00",
+  "signature": "CF 18 01",
   "signatureOffset": 3,
   "packetLengthOffset": 0,
   "packetLengthBytes": 3,
   "maximumPacketLength": 2000000,
-  "itemIdOffset": 29,
-  "quantityOffset": 33,
-  "minimumLength": 134,
+  "itemIdOffset": 33,
+  "quantityOffset": 37,
+  "minimumLength": 138,
   "maxReasonableItemId": 10000000,
   "maxReasonableQuantity": 10000000000,
   "groundLootOnly": true,
   "groundLootChecks": [
     {
-      "offset": 50,
+      "offset": 54,
       "bytes": "00 00 00"
     },
     {
-      "offset": 133,
+      "offset": 137,
       "bytes": "00"
     }
   ]

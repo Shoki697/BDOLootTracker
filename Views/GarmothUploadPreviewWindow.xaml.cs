@@ -1,21 +1,31 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using BDOLootTracker.Models;
 using BDOLootTracker.Services;
 
 namespace BDOLootTracker.Views;
 
-public partial class GarmothUploadPreviewWindow : Window
+public partial class GarmothUploadPreviewWindow : Window, INotifyPropertyChanged
 {
     private readonly DatabaseService _database;
     private readonly GarmothUploadService _uploadService;
     private readonly string _apiKey;
     private readonly SessionSummary _session;
     private readonly ObservableCollection<GarmothUploadLootEditRow> _rows;
+    private readonly IReadOnlyList<SpotCandidate> _spotOptions;
+    private readonly ListCollectionView _spotOptionsView;
+    private SpotCandidate? _selectedUploadSpot;
+    private string _uploadSpotSearchText = string.Empty;
+    private bool _spotSearchActive;
     private bool _isUploading;
     private int _currentUploadCount;
     private DateTime? _currentUploadedAtUtc;
+    private readonly bool _gatheringCategoryDetected;
 
     public bool UploadedSuccessfully { get; private set; }
 
@@ -31,6 +41,27 @@ public partial class GarmothUploadPreviewWindow : Window
         _uploadService = uploadService;
         _apiKey = apiKey?.Trim() ?? string.Empty;
         _session = session;
+        _gatheringCategoryDetected =
+            string.Equals(session.SpotKey, "__gathering__", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(session.SpotName, "Gathering", StringComparison.OrdinalIgnoreCase);
+
+        _spotOptions = _database.GetAllGarmothSpots();
+        _spotOptionsView = new ListCollectionView(_spotOptions.ToList());
+        _spotOptionsView.Filter = SpotMatchesFilter;
+
+        _selectedUploadSpot = _gatheringCategoryDetected
+            ? null
+            : _spotOptions.FirstOrDefault(x =>
+                (!string.IsNullOrWhiteSpace(session.SpotKey) &&
+                 string.Equals(x.SpotKey, session.SpotKey, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(session.SpotName) &&
+                 string.Equals(x.Name, session.SpotName, StringComparison.OrdinalIgnoreCase)));
+        _uploadSpotSearchText = _gatheringCategoryDetected
+            ? string.Empty
+            : _selectedUploadSpot?.Name
+                ?? (!string.IsNullOrWhiteSpace(session.SpotName) ? session.SpotName : string.Empty);
+        _spotSearchActive = false;
+        DataContext = this;
 
         _rows = new ObservableCollection<GarmothUploadLootEditRow>(loot.Select(x => new GarmothUploadLootEditRow
         {
@@ -44,7 +75,7 @@ public partial class GarmothUploadPreviewWindow : Window
 
         LootGrid.ItemsSource = _rows;
         LootCountText.Text = $"{_rows.Count:N0} item(s)";
-        SpotText.Text = string.IsNullOrWhiteSpace(session.SpotName) ? "Unknown grind spot" : session.SpotName;
+        UpdateSpotHint();
 
         string classText = string.IsNullOrWhiteSpace(session.ClassName)
             ? "Class —"
@@ -57,6 +88,146 @@ public partial class GarmothUploadPreviewWindow : Window
         _currentUploadCount = Math.Max(0, session.GarmothUploadCount);
         _currentUploadedAtUtc = session.GarmothUploadedAtUtc;
         RefreshUploadStatus(_currentUploadCount, _currentUploadedAtUtc);
+    }
+
+    public ListCollectionView UploadSpotOptionsView => _spotOptionsView;
+
+    public SpotCandidate? SelectedUploadSpot
+    {
+        get => _selectedUploadSpot;
+        set
+        {
+            if (ReferenceEquals(_selectedUploadSpot, value))
+                return;
+
+            _selectedUploadSpot = value;
+            OnPropertyChanged();
+
+            if (value != null)
+            {
+                _uploadSpotSearchText = value.Name;
+                _spotSearchActive = false;
+                OnPropertyChanged(nameof(UploadSpotSearchText));
+                _spotOptionsView.Refresh();
+            }
+
+            UpdateSpotHint();
+        }
+    }
+
+    public string UploadSpotSearchText
+    {
+        get => _uploadSpotSearchText;
+        set
+        {
+            value ??= string.Empty;
+            if (string.Equals(_uploadSpotSearchText, value, StringComparison.Ordinal))
+                return;
+
+            _uploadSpotSearchText = value;
+            _spotSearchActive = true;
+
+            if (_selectedUploadSpot != null &&
+                !string.Equals(_selectedUploadSpot.Name, value.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                _selectedUploadSpot = null;
+                OnPropertyChanged(nameof(SelectedUploadSpot));
+            }
+
+            OnPropertyChanged();
+            _spotOptionsView.Refresh();
+            UpdateSpotHint();
+        }
+    }
+
+    private bool SpotMatchesFilter(object item)
+    {
+        if (item is not SpotCandidate spot)
+            return false;
+
+        string query = (_uploadSpotSearchText ?? string.Empty).Trim();
+        if (!_spotSearchActive || string.IsNullOrWhiteSpace(query))
+            return true;
+
+        if (spot.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string normalizedQuery = NormalizeSpotSearch(query);
+        string normalizedName = NormalizeSpotSearch(spot.Name);
+        return normalizedQuery.Length > 0 && normalizedName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeSpotSearch(string value)
+        => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private SpotCandidate? ResolveSelectedUploadSpot()
+    {
+        string typed = (_uploadSpotSearchText ?? string.Empty).Trim();
+
+        if (_selectedUploadSpot != null &&
+            (string.IsNullOrWhiteSpace(typed) ||
+             string.Equals(_selectedUploadSpot.Name, typed, StringComparison.OrdinalIgnoreCase)))
+        {
+            return _selectedUploadSpot;
+        }
+
+        if (string.IsNullOrWhiteSpace(typed))
+            return null;
+
+        return _spotOptions.FirstOrDefault(x =>
+            string.Equals(x.Name, typed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void UpdateSpotHint()
+    {
+        if (SpotHintText == null)
+            return;
+
+        if (_spotOptions.Count == 0)
+        {
+            SpotHintText.Text = "No Garmoth spots are cached. Run Settings → Database & Loot → Fetch / Update first.";
+            SpotHintText.Foreground = (System.Windows.Media.Brush)FindResource("Muted");
+            return;
+        }
+
+        SpotCandidate? selected = ResolveSelectedUploadSpot();
+        if (selected != null)
+        {
+            SpotHintText.Text = $"Selected: {selected.Name}. The choice is saved to this session when you upload.";
+            SpotHintText.Foreground = (System.Windows.Media.Brush)FindResource("Green");
+            return;
+        }
+
+        int visible = _spotOptionsView.Cast<object>().Count();
+        if (_gatheringCategoryDetected && string.IsNullOrWhiteSpace(_uploadSpotSearchText))
+        {
+            SpotHintText.Text =
+                $"Gathering was detected automatically. Choose the exact Garmoth gathering spot before upload ({_spotOptions.Count:N0} spots available).";
+        }
+        else
+        {
+            SpotHintText.Text = string.IsNullOrWhiteSpace(_uploadSpotSearchText)
+                ? $"{_spotOptions.Count:N0} Garmoth spot(s) available — start typing to search."
+                : $"{visible:N0} matching Garmoth spot(s). Select an exact result before upload.";
+        }
+        SpotHintText.Foreground = (System.Windows.Media.Brush)FindResource("Muted");
+    }
+
+    private void SpotComboBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (sender is ComboBox combo && combo.IsEditable && combo.IsEnabled)
+            combo.IsDropDownOpen = true;
+    }
+
+    private void SpotComboBox_KeyUp(object sender, KeyEventArgs e)
+    {
+        if (sender is not ComboBox combo || !combo.IsEditable || !combo.IsEnabled)
+            return;
+
+        if (e.Key is Key.Escape or Key.Enter or Key.Tab)
+            return;
+
+        combo.IsDropDownOpen = true;
     }
 
     private void RefreshUploadStatus(int uploadCount, DateTime? uploadedAtUtc)
@@ -137,8 +308,20 @@ public partial class GarmothUploadPreviewWindow : Window
 
         try
         {
+            SpotCandidate? selectedSpot = ResolveSelectedUploadSpot();
+            if (selectedSpot == null || string.IsNullOrWhiteSpace(selectedSpot.SpotKey))
+            {
+                throw new InvalidOperationException(
+                    "Select an exact grind spot from the Garmoth list before uploading. You can type any part of the spot name to search.");
+            }
+
             int? dropRate = ReadDropRate();
             IReadOnlyList<SessionLootHistoryRow> uploadLoot = BuildUploadLoot();
+
+            // Keep the correction with the stored session as well. This is useful for
+            // gathering/ambiguous spots where automatic detection cannot be reliable.
+            _database.UpdateSessionSpot(_session.SessionId, selectedSpot.SpotKey, selectedSpot.Name);
+            SessionSummary uploadSession = CloneSessionWithSpot(_session, selectedSpot);
 
             if (_currentUploadCount > 0 || _currentUploadedAtUtc != null)
             {
@@ -158,7 +341,7 @@ public partial class GarmothUploadPreviewWindow : Window
 
             GarmothUploadService.UploadResult result = await _uploadService.UploadSessionAsync(
                 _apiKey,
-                _session,
+                uploadSession,
                 uploadLoot,
                 dropRate,
                 CancellationToken.None);
@@ -205,6 +388,35 @@ public partial class GarmothUploadPreviewWindow : Window
                 UploadButton.Content = (_currentUploadCount > 0 || _currentUploadedAtUtc != null) ? "Upload again" : "Upload to Garmoth";
         }
     }
+
+    private static SessionSummary CloneSessionWithSpot(SessionSummary source, SpotCandidate spot)
+    {
+        return new SessionSummary
+        {
+            SessionId = source.SessionId,
+            StartedAtUtc = source.StartedAtUtc,
+            EffectiveEndUtc = source.EffectiveEndUtc,
+            IsCompleted = source.IsCompleted,
+            Region = source.Region,
+            CharacterName = source.CharacterName,
+            ClassType = source.ClassType,
+            ClassName = source.ClassName,
+            Spec = source.Spec,
+            SpotKey = spot.SpotKey,
+            SpotName = spot.Name,
+            TotalSilver = source.TotalSilver,
+            TotalTrash = source.TotalTrash,
+            GarmothUploadedAtUtc = source.GarmothUploadedAtUtc,
+            GarmothUploadCount = source.GarmothUploadCount,
+            DropRatePercent = source.DropRatePercent,
+            ActiveDuration = source.ActiveDuration
+        };
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 

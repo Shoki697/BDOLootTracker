@@ -18,7 +18,8 @@ public sealed class AppSettings
     public bool ExitLagMode { get; set; }
 
     // Optional live-loot filter. When enabled, only item IDs present in the
-    // locally cached Garmoth grind-spot drop list are tracked.
+    // downloaded Garmoth grind-loot catalog are shown/tracked. Manual parser
+    // calibration intentionally ignores this setting and never uses Garmoth.
     public bool OnlyTrackGarmothItems { get; set; } = true;
 
     // Remembers whether the right-side live loot list was collapsed.

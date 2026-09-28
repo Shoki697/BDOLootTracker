@@ -17,7 +17,7 @@
 
         <StackPanel>
             <TextBlock Text="Ground Loot Calibration" FontSize="24" FontWeight="SemiBold" />
-            <TextBlock Text="Weekly patch repair using normal ground loot only. Storage, Market, Maid and other inventory transfers are ignored. If the result differs from official, Submit Calibration sends only parser structure and validation stats to the built-in Community service."
+            <TextBlock Text="Weekly patch repair using normal ground loot only. The Garmoth-only display filter is ignored during calibration. Storage, Market, Maid and other inventory transfers are ignored. If the result differs from official, Submit Calibration sends only parser structure and validation stats to the built-in Community service."
                        Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,5,0,0" />
         </StackPanel>
 

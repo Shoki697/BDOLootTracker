@@ -470,7 +470,7 @@
 
                     <CheckBox x:Name="GarmothOnlyLootCheckBox"
                               Content="Show and track only loot items known by Garmoth" />
-                    <TextBlock Text="When enabled, packet items that are not present in the locally cached Garmoth grind-spot drop list are ignored. Disable it to track every detected loot item."
+                    <TextBlock Text="When enabled, live packet loot is filtered against Garmoth's downloaded grind-loot catalog. This does not affect Manual Calibration: calibration always uses the local item catalog and never uses the Garmoth filter or spot list."
                                Foreground="{StaticResource Muted}"
                                FontSize="11"
                                TextWrapping="Wrap"

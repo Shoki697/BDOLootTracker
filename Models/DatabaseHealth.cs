@@ -10,6 +10,9 @@ public sealed class DatabaseHealth
     public int NameCount { get; init; }
     public int MarketPriceCount { get; init; }
     public int CachedIconCount { get; init; }
+    public int GrindSpotCount { get; init; }
+    public int GrindSpotDropLinkCount { get; init; }
+    public DateTime? GrindSpotsUpdatedUtc { get; init; }
 
     public bool MarketIsStale(TimeSpan maxAge)
         => MarketUpdatedUtc == null || DateTime.UtcNow - MarketUpdatedUtc.Value > maxAge;

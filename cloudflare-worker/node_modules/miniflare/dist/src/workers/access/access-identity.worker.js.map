@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../../src/workers/access/access-identity.worker.ts"],
+  "sourcesContent": ["// Access identity binding worker for local dev.\n//\n// In production, workerd dispatches `ctx.access.getIdentity()` to an Access\n// binding worker via JS-RPC, passing `{ aud, jwtClaims }` as `ctx.props`.\n// This embedded worker mirrors that interface: it receives `ctx.props` from\n// workerd and returns the `jwtClaims` value as the identity.\n\nimport { WorkerEntrypoint } from \"cloudflare:workers\";\n\ninterface Props {\n\taud: string;\n\tjwtClaims?: Record<string, unknown>;\n}\n\nexport default class AccessIdentityBinding extends WorkerEntrypoint<\n\tRecord<string, never>,\n\tProps\n> {\n\tasync getIdentity(): Promise<Record<string, unknown> | undefined> {\n\t\treturn this.ctx.props.jwtClaims;\n\t}\n}\n"],
+  "mappings": ";AAOA,SAAS,wBAAwB;AAOjC,IAAqB,wBAArB,cAAmD,iBAGjD;AAAA,EACD,MAAM,cAA4D;AACjE,WAAO,KAAK,IAAI,MAAM;AAAA,EACvB;AACD;",
+  "names": []
+}

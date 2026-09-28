@@ -52,6 +52,12 @@ public sealed class ParserProfileService : IDisposable
         ParserProfile embedded = LoadEmbeddedProfile();
         ParserProfile? local = TryLoadProfileFile(_activeProfilePath);
 
+        // Never let a failed local calibration such as 00 00 00 or FF FF FF pin the
+        // runtime parser. Those signatures carry no packet identity and can match
+        // arbitrary payload bytes. Fall back to the embedded/official profile instead.
+        if (local != null && IsLocalCalibrationVersion(local.ProfileVersion) && HasDegeneratePacketSignature(local.Signature))
+            local = null;
+
         // A newer application release may contain a parser hotfix that is newer
         // than a profile cached by an older install. Prefer that built-in profile
         // even without any network access.
@@ -70,6 +76,55 @@ public sealed class ParserProfileService : IDisposable
 
     public ParserProfile? LoadLastKnownGood()
         => TryLoadProfileFile(_lastKnownGoodPath);
+
+    /// <summary>
+    /// Returns a trusted seed for Ground Loot calibration. A LOCAL calibration is
+    /// deliberately never allowed to seed the next calibration run; otherwise one
+    /// bad local repair can recursively teach the following repair the same wrong
+    /// signature/offsets. Prefer a non-local last-known-good profile when available,
+    /// otherwise fall back to the parser embedded in this application build.
+    /// </summary>
+    public ParserProfile LoadCalibrationSeedProfile(out string source)
+    {
+        ParserProfile active = LoadActiveProfile(out string activeSource);
+        if (!IsLocalCalibrationVersion(active.ProfileVersion))
+        {
+            source = activeSource;
+            return active;
+        }
+
+        ParserProfile? lastKnownGood = LoadLastKnownGood();
+        if (lastKnownGood != null && !IsLocalCalibrationVersion(lastKnownGood.ProfileVersion))
+        {
+            source = "Last-known-good calibration baseline";
+            return lastKnownGood;
+        }
+
+        source = "Built-in calibration baseline";
+        return LoadEmbeddedProfile();
+    }
+
+    private static bool IsLocalCalibrationVersion(string? profileVersion)
+        => !string.IsNullOrWhiteSpace(profileVersion) &&
+           profileVersion.StartsWith("LOCAL-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasDegeneratePacketSignature(string? signature)
+    {
+        try
+        {
+            byte[] bytes = ParseHex(signature ?? string.Empty);
+            if (bytes.Length < 2)
+                return true;
+
+            bool allZero = bytes.All(x => x == 0x00);
+            bool allFF = bytes.All(x => x == 0xFF);
+            return allZero || allFF;
+        }
+        catch
+        {
+            return true;
+        }
+    }
 
     /// <summary>
     /// Called when START is pressed. Checks GitHub for a newer JSON profile,
@@ -847,6 +902,9 @@ public sealed class ParserProfileService : IDisposable
             throw new InvalidDataException("Parser server port is invalid.");
 
         byte[] signature = ParseHex(profile.Signature);
+        if (signature.Length < 2 || signature.All(x => x == 0x00) || signature.All(x => x == 0xFF))
+            throw new InvalidDataException("Parser signature is invalid or contains only filler bytes.");
+
         if (profile.SignatureOffset < 0 ||
             profile.PacketLengthOffset < 0 ||
             profile.PacketLengthBytes < 1 || profile.PacketLengthBytes > 4 ||

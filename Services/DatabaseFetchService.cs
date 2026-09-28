@@ -19,7 +19,7 @@ public sealed class DatabaseFetchService : IDisposable
         };
 
         _httpClient.DefaultRequestHeaders.UserAgent.Add(
-            new ProductInfoHeaderValue("BDOLootTracker", "0.12.7"));
+            new ProductInfoHeaderValue("BDOLootTracker", "0.13.0"));
 
         _catalogApi = new ItemCatalogApiService(_httpClient);
         _marketApi = new MarketApiService(_httpClient);
@@ -90,7 +90,7 @@ public sealed class DatabaseFetchService : IDisposable
         progress?.Report(new DatabaseFetchProgress
         {
             Percent = 90,
-            Message = "Downloading grind spot / drop reference..."
+            Message = "Downloading Garmoth spot catalog / drop reference..."
         });
 
         try
@@ -100,7 +100,7 @@ public sealed class DatabaseFetchService : IDisposable
             progress?.Report(new DatabaseFetchProgress
             {
                 Percent = 91,
-                Message = $"Saving grind spot reference ({spots.Count:N0} spots)..."
+                Message = $"Saving Garmoth spot catalog ({spots.Count:N0} spots)..."
             });
 
             await Task.Run(

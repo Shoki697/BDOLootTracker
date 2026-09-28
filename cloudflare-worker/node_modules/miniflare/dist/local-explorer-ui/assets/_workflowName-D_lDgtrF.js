@@ -1,0 +1,1 @@
+import{_t as e}from"./index-BSZvhHWL.js";var t=e;export{t as notFoundComponent};
