@@ -540,14 +540,41 @@ public partial class SessionHistoryWindow : Window
         header.Children.Add(sessionTime);
         stack.Children.Add(header);
 
-        stack.Children.Add(new TextBlock
+        var spotLine = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 8, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        spotLine.Children.Add(new TextBlock
         {
             Text = GetSpotDisplayName(session),
             Foreground = text,
             FontSize = 21,
             FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 8, 0, 0)
+            VerticalAlignment = VerticalAlignment.Center
         });
+        if (session.TaxApplied)
+        {
+            spotLine.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(38, 56, 232, 139)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(128, 56, 232, 139)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(6, 2, 6, 2),
+                Margin = new Thickness(9, 1, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = "TAXED",
+                    Foreground = new SolidColorBrush(Color.FromRgb(102, 240, 178)),
+                    FontSize = 9.5,
+                    FontWeight = FontWeights.Bold
+                }
+            });
+        }
+        stack.Children.Add(spotLine);
 
         string classText = string.IsNullOrWhiteSpace(session.ClassName)
             ? "Class —"
@@ -931,6 +958,8 @@ public partial class SessionHistoryWindow : Window
         public string DropRateText => Session.DropRatePercent.HasValue ? $"{Session.DropRatePercent}%" : "—";
         public string ExpandGlyph => IsExpanded ? "▲" : "▼";
         public string ActivityStatusText => IsActive ? "ACTIVE" : string.Empty;
+        public bool IsTaxed => Session.TaxApplied;
+        public string TaxBadgeText => Session.TaxApplied ? Session.TaxStatusText : string.Empty;
         public string GarmothStatusText => Session.IsUploadedToGarmoth ? $"✓ Garmoth {Math.Max(1, Session.GarmothUploadCount)}x" : "Not uploaded";
         public Brush GarmothStatusBrush => Session.IsUploadedToGarmoth ? ResourceBrush("Green", Brushes.LimeGreen) : ResourceBrush("Muted", Brushes.Gray);
         public string GarmothDetailText => Session.IsUploadedToGarmoth

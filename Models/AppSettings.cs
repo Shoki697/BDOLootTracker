@@ -11,6 +11,13 @@ public sealed class AppSettings
     public string DatabasePath { get; set; } = string.Empty;
     public string GarmothApiKey { get; set; } = string.Empty;
 
+    // Central Market tax estimate used only for local session value display.
+    // Raw loot quantities/prices and Garmoth uploads remain unchanged.
+    public bool TaxValuePackEnabled { get; set; }
+    public bool TaxMerchantRingEnabled { get; set; }
+    public int TaxFamilyFame { get; set; }
+    public bool ApplyMarketTaxToSessions { get; set; }
+
     // Optional compatibility mode for ExitLag. When enabled, packet capture
     // scans TCP streams for the configured BDO loot signature instead of
     // assuming the original server port, then locks to one relay stream and

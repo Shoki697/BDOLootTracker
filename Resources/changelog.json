@@ -263,5 +263,26 @@
         "description": "After updating, run Settings → Database & Loot → Fetch / Update Database once to refresh prices, item metadata and the cached Garmoth spot list used by manual spot selection and uploads."
       }
     ]
+  },
+  "0.13.1": {
+    "title": "v0.13.1 Market Tax Preview",
+    "changes": [
+      {
+        "title": "Central Market tax settings",
+        "description": "Character settings now include Value Pack, Rich Merchant Ring and Family Fame options with a live estimated market return percentage."
+      },
+      {
+        "title": "Optional taxed session values",
+        "description": "Tax can be applied to local TOTAL SILVER and SILVER / HR. Only non-trash market loot is reduced; trash/vendor loot stays at full value and raw Garmoth upload data is unchanged."
+      },
+      {
+        "title": "Tax state saved per session",
+        "description": "Each session stores whether tax was applied and the effective collection rate, so later settings changes do not rewrite old Session History values."
+      },
+      {
+        "title": "TAXED indicators",
+        "description": "Taxed sessions are marked in Session History, generated session screenshots and both Detailed and Compact overlays."
+      }
+    ]
   }
 }

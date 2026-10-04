@@ -183,7 +183,14 @@
                                                 </Grid.ColumnDefinitions>
                                                 <StackPanel>
                                                     <TextBlock Text="{Binding HeaderText}" FontSize="15" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{Binding SpotText}" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,3,0,0" />
+                                                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                                        <TextBlock Text="{Binding SpotText}" Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center" />
+                                                        <Border Visibility="{Binding IsTaxed, Converter={StaticResource BoolToVisibility}}"
+                                                                Background="#2638E88B" BorderBrush="#8038E88B" BorderThickness="1"
+                                                                CornerRadius="5" Padding="6,1" Margin="8,0,0,0">
+                                                            <TextBlock Text="{Binding TaxBadgeText}" Foreground="#66F0B2" FontSize="9" FontWeight="Bold" />
+                                                        </Border>
+                                                    </StackPanel>
                                                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                                         <TextBlock Text="{Binding SilverHrText}" Foreground="{StaticResource Green}" FontWeight="SemiBold" />
                                                         <TextBlock Text="   •   " Foreground="{StaticResource Muted}" />

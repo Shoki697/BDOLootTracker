@@ -52,6 +52,49 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="YesNoToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Width" Value="112" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="#0D151D"
+                                BorderBrush="{StaticResource Border}"
+                                BorderThickness="1"
+                                CornerRadius="7">
+                            <Grid Margin="3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="YesBackground" Grid.Column="0" CornerRadius="5" Background="Transparent" />
+                                <Border x:Name="NoBackground" Grid.Column="1" CornerRadius="5" Background="#17232E" />
+                                <TextBlock x:Name="YesText" Grid.Column="0" Text="Yes"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{StaticResource Muted}" FontWeight="SemiBold" />
+                                <TextBlock x:Name="NoText" Grid.Column="1" Text="No"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{StaticResource Text}" FontWeight="SemiBold" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="YesBackground" Property="Background" Value="#28A86B" />
+                                <Setter TargetName="NoBackground" Property="Background" Value="Transparent" />
+                                <Setter TargetName="YesText" Property="Foreground" Value="White" />
+                                <Setter TargetName="NoText" Property="Foreground" Value="{StaticResource Muted}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Background="{StaticResource Bg}">
@@ -444,6 +487,85 @@
                                Foreground="{StaticResource Muted}"
                                FontSize="12"
                                Margin="0,8,0,0" />
+
+                    <Border Height="1" Background="{StaticResource Border}" Margin="0,18,0,16" />
+
+                    <TextBlock Text="MARKET TAX"
+                               Foreground="{StaticResource Accent}"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="Estimate Central Market silver after the standard 35% tax. Value Pack, Rich Merchant's Ring and Family Fame bonuses are applied to the post-tax 65% collection amount. Trash/vendor loot remains untaxed."
+                               Foreground="{StaticResource Muted}"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="0,6,0,0" />
+
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="1.25*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Value Pack" Foreground="{StaticResource Muted}" Margin="0,0,0,6" />
+                            <ToggleButton x:Name="TaxValuePackToggle" Style="{StaticResource YesNoToggleStyle}" HorizontalAlignment="Left" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Merchant Ring" Foreground="{StaticResource Muted}" Margin="0,0,0,6" />
+                            <ToggleButton x:Name="TaxMerchantRingToggle" Style="{StaticResource YesNoToggleStyle}" HorizontalAlignment="Left" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Family Fame" Foreground="{StaticResource Muted}" Margin="0,0,0,6" />
+                            <TextBox x:Name="TaxFamilyFameBox"
+                                     Width="112" Height="36"
+                                     HorizontalAlignment="Left"
+                                     HorizontalContentAlignment="Center"
+                                     VerticalContentAlignment="Center"
+                                     MaxLength="7" />
+                            <TextBlock x:Name="TaxFameBonusText" Text="Bonus +0.0%"
+                                       Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="6">
+                            <TextBlock Text="Market return" Foreground="{StaticResource Muted}" Margin="0,0,0,6" />
+                            <Border Height="36" Background="#0D151D" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="7" Padding="10,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="1" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="TaxCollectionText" Text="65.00%" Foreground="{StaticResource Green}"
+                                               FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                    <Border Grid.Column="1" Background="{StaticResource Border}" Margin="4,5" />
+                                    <TextBlock x:Name="TaxLossText" Grid.Column="2" Text="−35.00%" Foreground="#E45B64"
+                                               FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Background="#0D151D" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,16,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ToggleButton x:Name="ApplyTaxToSessionsToggle" Grid.Column="0" Style="{StaticResource YesNoToggleStyle}" />
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                <TextBlock Text="Apply tax to session values" FontWeight="SemiBold" />
+                                <TextBlock Text="When enabled, TOTAL SILVER and SILVER / HR use the estimated net market value for non-trash loot. Sessions save this tax state permanently; Garmoth uploads still use the original raw loot values."
+                                           Foreground="{StaticResource Muted}" FontSize="10.5" TextWrapping="Wrap" Margin="0,3,0,0" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
                 </StackPanel>
             </Border>
 

@@ -55,7 +55,16 @@
                                            FontWeight="SemiBold"
                                            FontSize="12"
                                            TextTrimming="CharacterEllipsis"
-                                           MaxWidth="120" />
+                                           MaxWidth="105" />
+                                <Border Visibility="{Binding TaxBadgeVisibility}"
+                                        Background="#2638E88B"
+                                        BorderBrush="#8038E88B"
+                                        BorderThickness="1"
+                                        CornerRadius="5"
+                                        Padding="5,1"
+                                        Margin="7,0,0,0">
+                                    <TextBlock Text="TAXED" Foreground="#66F0B2" FontSize="8" FontWeight="Bold" />
+                                </Border>
                             </StackPanel>
                             <Border Grid.Column="1"
                                     Background="{Binding TrackerStateBackground}"
@@ -206,7 +215,16 @@
                                            FontWeight="SemiBold"
                                            FontSize="11"
                                            TextTrimming="CharacterEllipsis"
-                                           MaxWidth="120" />
+                                           MaxWidth="105" />
+                                <Border Visibility="{Binding TaxBadgeVisibility}"
+                                        Background="#2638E88B"
+                                        BorderBrush="#8038E88B"
+                                        BorderThickness="1"
+                                        CornerRadius="5"
+                                        Padding="4,1"
+                                        Margin="6,0,0,0">
+                                    <TextBlock Text="TAXED" Foreground="#66F0B2" FontSize="7.5" FontWeight="Bold" />
+                                </Border>
                             </StackPanel>
                             <Border Grid.Column="1"
                                     Background="{Binding TrackerStateBackground}"

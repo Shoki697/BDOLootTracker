@@ -118,6 +118,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private TimeSpan _stoppedElapsed = TimeSpan.Zero;
     private bool _isSessionPaused;
     private long _sessionId;
+    private bool _sessionTaxApplied;
+    private decimal _sessionTaxRate = 1m;
 
     private readonly Dictionary<string, double> _spotScores = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _spotNames = new(StringComparer.OrdinalIgnoreCase);
@@ -168,6 +170,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private Brush _trackerStateForeground = new SolidColorBrush(Color.FromRgb(150, 163, 175));
     private Brush _trackerStateBackground = new SolidColorBrush(Color.FromArgb(42, 91, 104, 116));
     private Brush _trackerStateBorderBrush = new SolidColorBrush(Color.FromArgb(102, 122, 137, 151));
+    private Visibility _taxBadgeVisibility = Visibility.Collapsed;
 
     public ObservableCollection<LootRowViewModel> LootRows { get; } = new();
     public string VersionText { get; } = GetVersionText();
@@ -252,6 +255,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public Brush TrackerStateForeground { get => _trackerStateForeground; private set => SetField(ref _trackerStateForeground, value); }
     public Brush TrackerStateBackground { get => _trackerStateBackground; private set => SetField(ref _trackerStateBackground, value); }
     public Brush TrackerStateBorderBrush { get => _trackerStateBorderBrush; private set => SetField(ref _trackerStateBorderBrush, value); }
+    public Visibility TaxBadgeVisibility { get => _taxBadgeVisibility; private set => SetField(ref _taxBadgeVisibility, value); }
 
     public IEnumerable<LootRowViewModel> MainLootRows => GetSortedLootRows();
 
@@ -763,6 +767,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _parserProfileConfirmedThisSession = false;
             _parserRecoveryPromptShown = false;
             _nextParserHealthCheckUtc = now.AddSeconds(30);
+            _sessionTaxApplied = _settings.ApplyMarketTaxToSessions;
+            _sessionTaxRate = _sessionTaxApplied
+                ? MarketTaxCalculator.GetCollectionRate(
+                    _settings.TaxValuePackEnabled,
+                    _settings.TaxMerchantRingEnabled,
+                    _settings.TaxFamilyFame)
+                : 1m;
+            TaxBadgeVisibility = _sessionTaxApplied ? Visibility.Visible : Visibility.Collapsed;
 
             CharacterClassOption? selectedClass = null;
             if (_settings.CharacterClassType != null)
@@ -789,7 +801,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 _settings.CharacterName,
                 selectedClass?.ClassType,
                 className,
-                spec);
+                spec,
+                _sessionTaxApplied,
+                _sessionTaxRate);
 
             _captureService.Start(_settings.AdapterName, _settings.ExitLagMode);
             _timer.Start();
@@ -920,6 +934,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _activeSegmentStartedUtc = null;
         _activeElapsed = TimeSpan.Zero;
         _isSessionPaused = false;
+        if (!sessionSaved)
+        {
+            _sessionTaxApplied = false;
+            _sessionTaxRate = 1m;
+            TaxBadgeVisibility = Visibility.Collapsed;
+        }
         StopButton.IsEnabled = false;
         UpdateSessionStateUi();
         UpdateGarmothUploadButtonState();
@@ -1232,7 +1252,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         SessionTimeText = $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}";
 
-        decimal totalSilver = LootRows.Sum(x => x.TotalSilver);
+        decimal totalSilver = LootRows.Sum(x =>
+            MarketTaxCalculator.ApplyToLootValue(
+                x.TotalSilver,
+                x.IsTrash,
+                _sessionTaxApplied,
+                _sessionTaxRate));
         ulong totalTrash = 0;
 
         foreach (var row in LootRows)

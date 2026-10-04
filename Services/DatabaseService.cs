@@ -160,6 +160,8 @@ public sealed class DatabaseService
         EnsureColumn(connection, "Sessions", "GarmothUploadedAtUtc", "TEXT NULL");
         EnsureColumn(connection, "Sessions", "GarmothUploadCount", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(connection, "Sessions", "DropRatePercent", "INTEGER NULL");
+        EnsureColumn(connection, "Sessions", "TaxApplied", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(connection, "Sessions", "TaxRate", "REAL NOT NULL DEFAULT 1.0");
         EnsureColumn(connection, "SessionLoot", "ItemName", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "SessionLoot", "UnitPrice", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(connection, "SessionLoot", "IsTrash", "INTEGER NOT NULL DEFAULT 0");
@@ -1394,7 +1396,9 @@ public sealed class DatabaseService
         string characterName,
         int? classType,
         string className,
-        string spec)
+        string spec,
+        bool taxApplied,
+        decimal taxRate)
     {
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
@@ -1404,9 +1408,9 @@ public sealed class DatabaseService
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO Sessions(
-                StartedAtUtc, LastSavedAtUtc, ActiveDurationSeconds, Region, CharacterName, ClassType, ClassName, Spec)
+                StartedAtUtc, LastSavedAtUtc, ActiveDurationSeconds, Region, CharacterName, ClassType, ClassName, Spec, TaxApplied, TaxRate)
             VALUES (
-                $started, $saved, NULL, $region, $character, $classType, $className, $spec);
+                $started, $saved, NULL, $region, $character, $classType, $className, $spec, $taxApplied, $taxRate);
             SELECT last_insert_rowid();
             """;
         command.Parameters.AddWithValue("$started", now);
@@ -1416,6 +1420,8 @@ public sealed class DatabaseService
         command.Parameters.AddWithValue("$classType", classType == null ? DBNull.Value : classType.Value);
         command.Parameters.AddWithValue("$className", string.IsNullOrWhiteSpace(className) ? DBNull.Value : className);
         command.Parameters.AddWithValue("$spec", string.IsNullOrWhiteSpace(spec) ? DBNull.Value : spec);
+        command.Parameters.AddWithValue("$taxApplied", taxApplied ? 1 : 0);
+        command.Parameters.AddWithValue("$taxRate", (double)Math.Clamp(taxRate, 0m, 1m));
 
         return (long)(command.ExecuteScalar() ?? 0L);
     }
@@ -1548,6 +1554,12 @@ public sealed class DatabaseService
                         CASE
                             WHEN sl.UnitPrice > 0 THEN sl.UnitPrice
                             ELSE COALESCE(NULLIF(p.UnitPrice, 0), i.VendorPrice, 0)
+                        END *
+                        CASE
+                            WHEN COALESCE(s.TaxApplied, 0) <> 0
+                                 AND NOT (sl.IsTrash <> 0 OR COALESCE(i.IsTrash, 0) <> 0)
+                            THEN COALESCE(s.TaxRate, 1.0)
+                            ELSE 1.0
                         END
                     END
                 ), 0) AS TotalSilver,
@@ -1563,7 +1575,9 @@ public sealed class DatabaseService
                 s.GarmothUploadedAtUtc,
                 COALESCE(s.GarmothUploadCount, 0),
                 s.DropRatePercent,
-                s.ActiveDurationSeconds
+                s.ActiveDurationSeconds,
+                COALESCE(s.TaxApplied, 0),
+                COALESCE(s.TaxRate, 1.0)
             FROM Sessions s
             LEFT JOIN SessionLoot sl ON sl.SessionId = s.SessionId
             LEFT JOIN Items i ON i.ItemId = sl.ItemId
@@ -1622,7 +1636,9 @@ public sealed class DatabaseService
                 DropRatePercent = reader.IsDBNull(15) ? null : checked((int)reader.GetInt64(15)),
                 ActiveDuration = reader.IsDBNull(16)
                     ? null
-                    : TimeSpan.FromSeconds(Math.Max(0, reader.GetInt64(16)))
+                    : TimeSpan.FromSeconds(Math.Max(0, reader.GetInt64(16))),
+                TaxApplied = !reader.IsDBNull(17) && reader.GetInt64(17) != 0,
+                TaxRate = reader.IsDBNull(18) ? 1m : (decimal)reader.GetDouble(18)
             });
         }
 

@@ -123,6 +123,13 @@ public partial class SettingsWindow : Window
         ClassCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
         SpecCombo.SelectionChanged += (_, _) => UpdateSaveButtonState();
         CharacterBox.TextChanged += (_, _) => UpdateSaveButtonState();
+        TaxValuePackToggle.Checked += TaxOption_Changed;
+        TaxValuePackToggle.Unchecked += TaxOption_Changed;
+        TaxMerchantRingToggle.Checked += TaxOption_Changed;
+        TaxMerchantRingToggle.Unchecked += TaxOption_Changed;
+        TaxFamilyFameBox.TextChanged += TaxOption_Changed;
+        ApplyTaxToSessionsToggle.Checked += TaxOption_Changed;
+        ApplyTaxToSessionsToggle.Unchecked += TaxOption_Changed;
         GarmothApiKeyBox.PasswordChanged += (_, _) => UpdateSaveButtonState();
         GarmothOnlyLootCheckBox.Checked += (_, _) => UpdateSaveButtonState();
         GarmothOnlyLootCheckBox.Unchecked += (_, _) => UpdateSaveButtonState();
@@ -136,6 +143,49 @@ public partial class SettingsWindow : Window
         OverlayHotkeyBox.TextChanged += (_, _) => UpdateSaveButtonState();
     }
 
+
+    private void TaxOption_Changed(object? sender, RoutedEventArgs e)
+    {
+        UpdateTaxPreview();
+        UpdateSaveButtonState();
+    }
+
+    private bool TryGetTaxFamilyFame(out int familyFame)
+    {
+        string raw = (TaxFamilyFameBox.Text ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            familyFame = 0;
+            return true;
+        }
+
+        return int.TryParse(raw, out familyFame) && familyFame >= 0 && familyFame <= 9_999_999;
+    }
+
+    private void UpdateTaxPreview()
+    {
+        if (TaxCollectionText == null || TaxLossText == null || TaxFameBonusText == null)
+            return;
+
+        if (!TryGetTaxFamilyFame(out int familyFame))
+        {
+            TaxCollectionText.Text = "—";
+            TaxLossText.Text = "—";
+            TaxFameBonusText.Text = "Enter a valid whole number";
+            return;
+        }
+
+        decimal rate = MarketTaxCalculator.GetCollectionRate(
+            TaxValuePackToggle.IsChecked == true,
+            TaxMerchantRingToggle.IsChecked == true,
+            familyFame);
+        decimal fameBonus = MarketTaxCalculator.GetFamilyFameBonus(familyFame);
+
+        decimal displayedReturn = MarketTaxCalculator.GetDisplayPercent(rate);
+        TaxCollectionText.Text = $"{displayedReturn:0.00}%";
+        TaxLossText.Text = $"−{100m - displayedReturn:0.00}%";
+        TaxFameBonusText.Text = $"Bonus +{fameBonus * 100m:0.0}%";
+    }
 
     private void ExitLagModeCheckBox_Checked(object sender, RoutedEventArgs e)
     {
@@ -195,6 +245,18 @@ public partial class SettingsWindow : Window
             return true;
 
         if (!string.Equals(CharacterBox.Text.Trim(), _settings.CharacterName ?? string.Empty, StringComparison.Ordinal))
+            return true;
+
+        if ((TaxValuePackToggle.IsChecked == true) != _settings.TaxValuePackEnabled)
+            return true;
+
+        if ((TaxMerchantRingToggle.IsChecked == true) != _settings.TaxMerchantRingEnabled)
+            return true;
+
+        if (!TryGetTaxFamilyFame(out int taxFamilyFame) || taxFamilyFame != Math.Max(0, _settings.TaxFamilyFame))
+            return true;
+
+        if ((ApplyTaxToSessionsToggle.IsChecked == true) != _settings.ApplyMarketTaxToSessions)
             return true;
 
         if (!string.Equals(GarmothApiKeyBox.Password.Trim(), _settings.GarmothApiKey ?? string.Empty, StringComparison.Ordinal))
@@ -290,6 +352,11 @@ public partial class SettingsWindow : Window
 
         DatabasePathBox.Text = _settings.DatabasePath;
         CharacterBox.Text = _settings.CharacterName;
+        TaxValuePackToggle.IsChecked = _settings.TaxValuePackEnabled;
+        TaxMerchantRingToggle.IsChecked = _settings.TaxMerchantRingEnabled;
+        TaxFamilyFameBox.Text = Math.Max(0, _settings.TaxFamilyFame).ToString();
+        ApplyTaxToSessionsToggle.IsChecked = _settings.ApplyMarketTaxToSessions;
+        UpdateTaxPreview();
         GarmothApiKeyBox.Password = _settings.GarmothApiKey ?? string.Empty;
         ExitLagModeCheckBox.IsChecked = _settings.ExitLagMode;
         GarmothOnlyLootCheckBox.IsChecked = _settings.OnlyTrackGarmothItems;
@@ -891,6 +958,12 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        if (!TryGetTaxFamilyFame(out int taxFamilyFame))
+        {
+            AppDialog.Show("Family Fame must be a whole number between 0 and 9,999,999.", "Market Tax", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         string region = GetSelectedRegion();
         string language = GetSelectedLanguage();
 
@@ -963,6 +1036,10 @@ public partial class SettingsWindow : Window
         settingsToSave.CharacterClassType = classSelected ? selectedClass!.ClassType : null;
         settingsToSave.CharacterSpec = classSelected ? (SpecCombo.SelectedItem?.ToString() ?? string.Empty) : string.Empty;
         settingsToSave.CharacterName = CharacterBox.Text.Trim();
+        settingsToSave.TaxValuePackEnabled = TaxValuePackToggle.IsChecked == true;
+        settingsToSave.TaxMerchantRingEnabled = TaxMerchantRingToggle.IsChecked == true;
+        settingsToSave.TaxFamilyFame = taxFamilyFame;
+        settingsToSave.ApplyMarketTaxToSessions = ApplyTaxToSessionsToggle.IsChecked == true;
         settingsToSave.DatabasePath = databasePath;
         settingsToSave.GarmothApiKey = GarmothApiKeyBox.Password.Trim();
         settingsToSave.OnlyTrackGarmothItems = GarmothOnlyLootCheckBox.IsChecked == true;
@@ -1053,6 +1130,10 @@ public partial class SettingsWindow : Window
         BrowseButton.IsEnabled = enabled;
         ClassCombo.IsEnabled = enabled;
         CharacterBox.IsEnabled = enabled;
+        TaxValuePackToggle.IsEnabled = enabled;
+        TaxMerchantRingToggle.IsEnabled = enabled;
+        TaxFamilyFameBox.IsEnabled = enabled;
+        ApplyTaxToSessionsToggle.IsEnabled = enabled;
         GarmothApiKeyBox.IsEnabled = enabled;
         OverlayModeCombo.IsEnabled = enabled;
         OverlayOpacitySlider.IsEnabled = enabled;

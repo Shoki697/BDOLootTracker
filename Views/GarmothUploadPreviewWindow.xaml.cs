@@ -409,7 +409,9 @@ public partial class GarmothUploadPreviewWindow : Window, INotifyPropertyChanged
             GarmothUploadedAtUtc = source.GarmothUploadedAtUtc,
             GarmothUploadCount = source.GarmothUploadCount,
             DropRatePercent = source.DropRatePercent,
-            ActiveDuration = source.ActiveDuration
+            ActiveDuration = source.ActiveDuration,
+            TaxApplied = source.TaxApplied,
+            TaxRate = source.TaxRate
         };
     }
 

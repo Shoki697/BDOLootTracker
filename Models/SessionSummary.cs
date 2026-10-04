@@ -1,3 +1,5 @@
+using BDOLootTracker.Services;
+
 namespace BDOLootTracker.Models;
 
 public sealed class SessionSummary
@@ -19,6 +21,12 @@ public sealed class SessionSummary
     public int GarmothUploadCount { get; init; }
     public int? DropRatePercent { get; init; }
     public TimeSpan? ActiveDuration { get; init; }
+    public bool TaxApplied { get; init; }
+    public decimal TaxRate { get; init; } = 1m;
+
+    public string TaxStatusText => TaxApplied
+        ? $"TAXED {MarketTaxCalculator.FormatPercent(TaxRate)}"
+        : string.Empty;
 
     public TimeSpan Duration => ActiveDuration is { } active && active >= TimeSpan.Zero
         ? active
