@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -640,8 +640,8 @@ public partial class SettingsWindow : Window
         if (_captureService?.IsRunning == true)
         {
             AppDialog.Show(
-                "Stop the current tracking session before running Manual Calibration.",
-                "Manual Calibration",
+                "Stop the current tracking session before running Calibration.",
+                "Calibration",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
@@ -651,7 +651,7 @@ public partial class SettingsWindow : Window
         {
             AppDialog.Show(
                 "Select a network adapter first.",
-                "Manual Calibration",
+                "Calibration",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
@@ -661,24 +661,48 @@ public partial class SettingsWindow : Window
         if (string.IsNullOrWhiteSpace(databasePath))
         {
             AppDialog.Show(
-                "Set the database path first. Ground Loot calibration ignores the Garmoth-only display filter. It uses the proven narrow trusted-loot ID cache as packet-layout anchors to avoid false packet matches.",
-                "Manual Calibration",
+                "Set the database path first. Grind calibration uses the trusted local loot catalog as packet-layout anchors.",
+                "Calibration",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
         }
 
+        // IMPORTANT: SettingsWindow itself was opened with ShowDialog().
+        // Calling Hide() and later Show() on it destroys that modal state and
+        // makes DialogResult throw when Save/Cancel is pressed. Keep Settings
+        // modal by minimizing it, while hiding the other application windows.
+        var windowsToHide = Application.Current.Windows
+            .Cast<Window>()
+            .Where(w => w != this && w.IsVisible)
+            .ToList();
+
+        WindowState previousSettingsState = WindowState;
+
         var window = new ParserCalibrationWindow(
             adapter.Name,
             databasePath,
             ExitLagModeCheckBox.IsChecked == true,
-            _parserProfileService)
-        {
-            Owner = this
-        };
+            _parserProfileService);
 
-        window.ShowDialog();
-        RefreshParserStatusLocal();
+        try
+        {
+            foreach (Window visible in windowsToHide)
+                visible.Hide();
+
+            WindowState = WindowState.Minimized;
+            window.ShowDialog();
+        }
+        finally
+        {
+            foreach (Window hidden in windowsToHide)
+                hidden.Show();
+
+            WindowState = previousSettingsState;
+            ShowInTaskbar = true;
+            Activate();
+            RefreshParserStatusLocal();
+        }
     }
 
     private async void ParserCheckUpdate_Click(object sender, RoutedEventArgs e)

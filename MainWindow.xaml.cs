@@ -1487,6 +1487,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             preview.ShowDialog();
             if (preview.UploadedSuccessfully)
                 StatusText = "Session uploaded to Garmoth successfully";
+            else if (preview.MetadataSavedSuccessfully)
+                StatusText = "Garmoth session spot / Drop Rate saved";
         }
         catch (Exception ex)
         {

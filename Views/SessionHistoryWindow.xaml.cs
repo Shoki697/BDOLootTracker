@@ -237,7 +237,7 @@ public partial class SessionHistoryWindow : Window
                 Owner = this
             };
             preview.ShowDialog();
-            if (preview.UploadedSuccessfully)
+            if (preview.UploadedSuccessfully || preview.MetadataSavedSuccessfully)
                 LoadSessions((SpotList.SelectedItem as SpotFilterItem)?.Key);
         }
         catch (Exception ex)

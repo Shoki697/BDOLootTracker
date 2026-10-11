@@ -298,7 +298,7 @@
 
                             <WrapPanel Margin="0,12,0,0">
                                 <Button x:Name="ParserManualCalibrationButton"
-                                        Content="Manual Calibration"
+                                        Content="Calibration"
                                         Margin="0,0,8,8"
                                         Background="#1266A8"
                                         Click="ParserManualCalibration_Click" />
@@ -308,7 +308,7 @@
                                         Click="ParserCheckUpdate_Click" />
                             </WrapPanel>
 
-                            <TextBlock Text="Official parser updates come from GitHub. Community parser sharing uses the built-in BDOLootTracker service automatically; no URL, browser, GitHub account or issue configuration is required. Ground Loot calibration stays local unless it passes, differs from the latest official parser, and you choose Submit Calibration."
+                            <TextBlock Text="Official parser updates come from GitHub. Community parser sharing uses the built-in BDOLootTracker service automatically; no URL, browser, GitHub account or issue configuration is required. Calibration uses a guided three-step wizard: Grind Loot ALLOW baseline plus Market and Storage BLOCK markers. Local calibration stays on this PC unless you choose Submit Calibration."
                                        Foreground="{StaticResource Muted}"
                                        FontSize="10"
                                        TextWrapping="Wrap"

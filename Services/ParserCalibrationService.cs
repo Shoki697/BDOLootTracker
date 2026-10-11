@@ -97,6 +97,61 @@ public sealed class ParserCalibrationService : IDisposable
         }
     }
 
+    public CalibrationCapture SnapshotCurrent()
+    {
+        lock (_sync)
+        {
+            var snapshots = new List<CalibrationFlowSnapshot>();
+            foreach (var pair in _flows)
+            {
+                lock (pair.Value.Sync)
+                {
+                    if (pair.Value.Payload.Count == 0)
+                        continue;
+
+                    snapshots.Add(new CalibrationFlowSnapshot(
+                        pair.Key.SourcePort,
+                        pair.Key.DestinationPort,
+                        pair.Value.Payload.ToArray()));
+                }
+            }
+
+            return new CalibrationCapture(snapshots);
+        }
+    }
+
+    public int EstimateMobLootSampleCount(
+        CalibrationCapture capture,
+        ParserProfile seed,
+        IReadOnlySet<uint> knownItemIds)
+    {
+        if (capture.Flows.Count == 0)
+            return 0;
+
+        var known = new HashSet<uint>(knownItemIds.Where(x => x > 0));
+        known.Remove(1);
+        known.Add(BlackStoneItemId);
+
+        byte[] seedSignature = ParserProfileService.ParseHex(seed.Signature);
+        int signatureLength = Math.Clamp(seedSignature.Length, 2, 8);
+
+        Dictionary<CandidateKey, CandidateStat> candidates = DiscoverLootCandidates(
+            capture, seed, known, signatureLength, quantityDeltaMin: 4, quantityDeltaMax: 4);
+
+        if (candidates.Count == 0 || candidates.Values.Max(x => x.PacketStarts.Count) < 5)
+        {
+            candidates = DiscoverLootCandidates(
+                capture, seed, known, signatureLength, quantityDeltaMin: 4, quantityDeltaMax: 12);
+        }
+
+        const int MaxPlausibleGuidedSamples = 128;
+        return candidates.Values
+            .Select(x => x.PacketStarts.Count)
+            .Where(x => x <= MaxPlausibleGuidedSamples)
+            .DefaultIfEmpty(0)
+            .Max();
+    }
+
     public MobCalibrationResult AnalyzeMobLoot(
         CalibrationCapture capture,
         ParserProfile seed,

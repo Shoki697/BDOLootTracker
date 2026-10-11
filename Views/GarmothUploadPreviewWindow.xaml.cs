@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
@@ -28,6 +28,7 @@ public partial class GarmothUploadPreviewWindow : Window, INotifyPropertyChanged
     private readonly bool _gatheringCategoryDetected;
 
     public bool UploadedSuccessfully { get; private set; }
+    public bool MetadataSavedSuccessfully { get; private set; }
 
     public GarmothUploadPreviewWindow(
         DatabaseService database,
@@ -56,10 +57,10 @@ public partial class GarmothUploadPreviewWindow : Window, INotifyPropertyChanged
                  string.Equals(x.SpotKey, session.SpotKey, StringComparison.OrdinalIgnoreCase)) ||
                 (!string.IsNullOrWhiteSpace(session.SpotName) &&
                  string.Equals(x.Name, session.SpotName, StringComparison.OrdinalIgnoreCase)));
-        _uploadSpotSearchText = _gatheringCategoryDetected
-            ? string.Empty
-            : _selectedUploadSpot?.Name
-                ?? (!string.IsNullOrWhiteSpace(session.SpotName) ? session.SpotName : string.Empty);
+        // Search is now separate from the actual selected spot. This keeps the
+        // dropdown selection stable (like the Session History "All Spots" selector)
+        // while still allowing the list to be filtered by typing.
+        _uploadSpotSearchText = string.Empty;
         _spotSearchActive = false;
         DataContext = this;
 
@@ -103,14 +104,7 @@ public partial class GarmothUploadPreviewWindow : Window, INotifyPropertyChanged
             _selectedUploadSpot = value;
             OnPropertyChanged();
 
-            if (value != null)
-            {
-                _uploadSpotSearchText = value.Name;
-                _spotSearchActive = false;
-                OnPropertyChanged(nameof(UploadSpotSearchText));
-                _spotOptionsView.Refresh();
-            }
-
+            _spotSearchActive = false;
             UpdateSpotHint();
         }
     }
@@ -125,18 +119,29 @@ public partial class GarmothUploadPreviewWindow : Window, INotifyPropertyChanged
                 return;
 
             _uploadSpotSearchText = value;
-            _spotSearchActive = true;
-
-            if (_selectedUploadSpot != null &&
-                !string.Equals(_selectedUploadSpot.Name, value.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                _selectedUploadSpot = null;
-                OnPropertyChanged(nameof(SelectedUploadSpot));
-            }
+            _spotSearchActive = !string.IsNullOrWhiteSpace(value);
 
             OnPropertyChanged();
             _spotOptionsView.Refresh();
             UpdateSpotHint();
+
+            // While the user is typing, immediately show the filtered spot list.
+            // BeginInvoke lets the CollectionView finish refreshing first and keeps
+            // keyboard focus in the search box instead of moving it to the ComboBox.
+            if (_spotSearchActive)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (SpotComboBox != null)
+                        SpotComboBox.IsDropDownOpen = true;
+
+                    if (SpotSearchBox != null && !SpotSearchBox.IsKeyboardFocusWithin)
+                    {
+                        SpotSearchBox.Focus();
+                        SpotSearchBox.CaretIndex = SpotSearchBox.Text?.Length ?? 0;
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Background);
+            }
         }
     }
 
@@ -162,18 +167,15 @@ public partial class GarmothUploadPreviewWindow : Window, INotifyPropertyChanged
 
     private SpotCandidate? ResolveSelectedUploadSpot()
     {
-        string typed = (_uploadSpotSearchText ?? string.Empty).Trim();
-
-        if (_selectedUploadSpot != null &&
-            (string.IsNullOrWhiteSpace(typed) ||
-             string.Equals(_selectedUploadSpot.Name, typed, StringComparison.OrdinalIgnoreCase)))
-        {
+        // The dropdown selection is authoritative. The search box only filters the list.
+        if (_selectedUploadSpot != null)
             return _selectedUploadSpot;
-        }
 
+        string typed = (_uploadSpotSearchText ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(typed))
             return null;
 
+        // Convenience fallback: if the search text exactly matches a spot, accept it.
         return _spotOptions.FirstOrDefault(x =>
             string.Equals(x.Name, typed, StringComparison.OrdinalIgnoreCase));
     }
@@ -228,6 +230,46 @@ public partial class GarmothUploadPreviewWindow : Window, INotifyPropertyChanged
             return;
 
         combo.IsDropDownOpen = true;
+    }
+
+    private void SpotComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox combo && combo.SelectedItem is SpotCandidate selected)
+        {
+            SelectedUploadSpot = selected;
+            UpdateSpotHint();
+        }
+    }
+
+    private void ClearSpotSearch_Click(object sender, RoutedEventArgs e)
+    {
+        UploadSpotSearchText = string.Empty;
+        SpotSearchBox?.Focus();
+    }
+
+    private void SaveSessionMetadata_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            SpotCandidate? selectedSpot = ResolveSelectedUploadSpot();
+            if (selectedSpot == null || string.IsNullOrWhiteSpace(selectedSpot.SpotKey))
+            {
+                throw new InvalidOperationException(
+                    "Select an exact grind spot from the Garmoth list before saving.");
+            }
+
+            int? dropRate = ReadDropRate();
+            _database.UpdateSessionSpot(_session.SessionId, selectedSpot.SpotKey, selectedSpot.Name);
+            _database.UpdateSessionDropRate(_session.SessionId, dropRate);
+
+            MetadataSavedSuccessfully = true;
+            StatusText.Text = "Spot and Drop Rate saved to the session.";
+            UpdateSpotHint();
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Show(ex.Message, "Save Garmoth Session Data", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void RefreshUploadStatus(int uploadCount, DateTime? uploadedAtUtc)

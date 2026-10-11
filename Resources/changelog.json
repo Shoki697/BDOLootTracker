@@ -284,5 +284,34 @@
         "description": "Taxed sessions are marked in Session History, generated session screenshots and both Detailed and Compact overlays."
       }
     ]
+  },
+  "0.13.4": {
+    "title": "v0.13.4 Calibration & Garmoth Upload Patch",
+    "changes": [
+      {
+        "title": "New Calibration Wizard",
+        "description": "Manual parser calibration now runs in a dedicated guided window with separate Grind Loot, Central Market and Storage stages. Grind Loot uses progress-based sample collection and stops automatically when enough valid samples are collected."
+      },
+      {
+        "title": "Market and Storage suppression restored",
+        "description": "Central Market and Storage calibration are learned separately as blocked transfer patterns. Transfer suppression takes priority over the Ground Loot allow fingerprint so inventory transfers are not counted as grind loot."
+      },
+      {
+        "title": "Calibration window stability",
+        "description": "Returning from Calibration no longer breaks the modal Settings window or causes DialogResult exceptions when Save or Cancel is used."
+      },
+      {
+        "title": "Garmoth spot picker improvements",
+        "description": "The Garmoth upload review now separates spot search from spot selection. Search filters the list live and automatically opens the dropdown while typing."
+      },
+      {
+        "title": "Save Garmoth metadata without uploading",
+        "description": "A dedicated Save button stores the selected Garmoth spot and Drop Rate on the session without uploading it. Session History refreshes with the saved metadata."
+      },
+      {
+        "title": "ImageSharp removed",
+        "description": "SixLabors.ImageSharp was removed to eliminate its license warning and known package vulnerability warnings. Image decoding and icon conversion now use SkiaSharp."
+      }
+    ]
   }
 }

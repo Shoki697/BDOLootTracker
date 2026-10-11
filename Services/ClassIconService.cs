@@ -1,9 +1,7 @@
 using System.IO;
 using System.Net.Http;
 using BDOLootTracker.Models;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 
 namespace BDOLootTracker.Services;
 
@@ -20,7 +18,7 @@ public sealed class ClassIconService : IDisposable
         {
             Timeout = TimeSpan.FromSeconds(12)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("BDOLootTracker/0.6");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("BDOLootTracker/0.13.4");
 
         _iconFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -54,24 +52,35 @@ public sealed class ClassIconService : IDisposable
             using var response = await _httpClient.GetAsync(characterClass.IconUrl, cancellationToken);
             response.EnsureSuccessStatusCode();
 
-            await using var sourceStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var image = await Image.LoadAsync(sourceStream, cancellationToken);
+            byte[] bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            using SKBitmap? source = SKBitmap.Decode(bytes);
+            if (source == null || source.Width <= 0 || source.Height <= 0)
+                return null;
 
-            // The official Pearl CDN class symbol is a wide banner. Crop the centered square
-            // where the class emblem is located, then scale it to a small local PNG.
-            int square = Math.Min(image.Width, image.Height);
-            int x = Math.Max(0, (image.Width - square) / 2);
-            int y = Math.Max(0, (image.Height - square) / 2);
+            int square = Math.Min(source.Width, source.Height);
+            int x = Math.Max(0, (source.Width - square) / 2);
+            int y = Math.Max(0, (source.Height - square) / 2);
 
-            image.Mutate(ctx => ctx
-                .Crop(new Rectangle(x, y, square, square))
-                .Resize(new ResizeOptions
-                {
-                    Size = new Size(64, 64),
-                    Mode = ResizeMode.Pad
-                }));
+            using var output = new SKBitmap(64, 64, SKColorType.Rgba8888, SKAlphaType.Premul);
+            using (var canvas = new SKCanvas(output))
+            {
+                canvas.Clear(SKColors.Transparent);
+                var srcRect = new SKRect(x, y, x + square, y + square);
+                var dstRect = new SKRect(0, 0, 64, 64);
+                canvas.DrawBitmap(source, srcRect, dstRect);
+                canvas.Flush();
+            }
 
-            await image.SaveAsync(destination, new PngEncoder(), cancellationToken);
+            using SKImage image = SKImage.FromBitmap(output);
+            using SKData? png = image.Encode(SKEncodedImageFormat.Png, 100);
+            if (png == null)
+                return null;
+
+            await using (var fs = File.Create(destination))
+            {
+                png.SaveTo(fs);
+                await fs.FlushAsync(cancellationToken);
+            }
 
             characterClass.IconPath = destination;
             _database.UpdateClassIconPath(characterClass.ClassType, destination);
@@ -84,6 +93,5 @@ public sealed class ClassIconService : IDisposable
         }
     }
 
-    public void Dispose()
-        => _httpClient.Dispose();
+    public void Dispose() => _httpClient.Dispose();
 }

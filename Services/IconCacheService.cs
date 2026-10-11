@@ -2,20 +2,15 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Png;
+using SkiaSharp;
 
 namespace BDOLootTracker.Services;
 
 /// <summary>
-/// Helyi item-icon cache.
+/// Local item-icon cache.
 ///
-/// A Garmoth grind adatbázisból eltárolt IconUrl az elsődleges forrás.
-/// A Garmoth ikonok jellemzően WEBP formátumúak, ezért ImageSharp-pal
-/// valódi PNG-vé konvertáljuk őket, mielőtt a WPF UI betölti.
-///
-/// Session közben egy item ikonja legfeljebb egyszer töltődik le;
-/// utána a lokális PNG fájlt használjuk.
+/// Garmoth item icons are often WEBP. SkiaSharp decodes the downloaded image
+/// and stores a real PNG so WPF can load it reliably.
 /// </summary>
 public sealed class IconCacheService : IDisposable
 {
@@ -33,22 +28,16 @@ public sealed class IconCacheService : IDisposable
             Timeout = TimeSpan.FromSeconds(20)
         };
 
-        // A Garmoth assets szerver browser-szerű User-Agenttel megbízhatóbban válaszol.
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36");
         _httpClient.DefaultRequestHeaders.Referrer = new Uri("https://garmoth.com/");
-        _httpClient.DefaultRequestHeaders.Accept.Add(
-            new MediaTypeWithQualityHeaderValue("image/webp"));
-        _httpClient.DefaultRequestHeaders.Accept.Add(
-            new MediaTypeWithQualityHeaderValue("image/png"));
-        _httpClient.DefaultRequestHeaders.Accept.Add(
-            new MediaTypeWithQualityHeaderValue("image/*", 0.8));
+        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("image/webp"));
+        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("image/png"));
+        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("image/*", 0.8));
     }
 
-    public async Task<string?> EnsureIconAsync(
-        uint itemId,
-        CancellationToken cancellationToken = default)
+    public async Task<string?> EnsureIconAsync(uint itemId, CancellationToken cancellationToken = default)
     {
         lock (_failedLock)
         {
@@ -69,8 +58,6 @@ public sealed class IconCacheService : IDisposable
             return finalPath;
         }
 
-        // Korábbi verzió esetleg WEBP byte-okat mentett .png néven.
-        // Ha ilyen van, töröljük és újra letöltjük/konvertáljuk.
         TryDeleteInvalidFile(finalPath);
 
         var gate = _locks.GetOrAdd(itemId, _ => new SemaphoreSlim(1, 1));
@@ -87,13 +74,6 @@ public sealed class IconCacheService : IDisposable
             TryDeleteInvalidFile(finalPath);
 
             string? databaseIconUrl = _database.GetIconUrl(itemId);
-
-            // Fontos a sorrend:
-            // 1. Garmothból/importból kapott konkrét icon URL
-            // 2. Garmoth általános drop-item fallback
-            // 3. Pearl market PNG fallback
-            //
-            // Distinct kell, mert a DB URL néha már valamelyik fallback.
             string[] urls = new[]
             {
                 databaseIconUrl ?? string.Empty,
@@ -135,18 +115,23 @@ public sealed class IconCacheService : IDisposable
                     if (bytes.Length < 32)
                         continue;
 
-                    // WPF nem kezeli natívan a WEBP-t. ImageSharp felismeri a bejövő
-                    // formátumot és valódi PNG-vé konvertálja.
-                    using Image image = Image.Load(bytes);
+                    using SKBitmap? bitmap = SKBitmap.Decode(bytes);
+                    if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
+                        continue;
+
+                    using SKImage image = SKImage.FromBitmap(bitmap);
+                    using SKData? png = image.Encode(SKEncodedImageFormat.Png, 100);
+                    if (png == null)
+                        continue;
 
                     string tempPath = finalPath + ".tmp";
-                    if (File.Exists(tempPath))
-                        File.Delete(tempPath);
+                    TryDeleteInvalidFile(tempPath);
 
-                    await image.SaveAsync(
-                        tempPath,
-                        new PngEncoder(),
-                        cancellationToken);
+                    await using (var fs = File.Create(tempPath))
+                    {
+                        png.SaveTo(fs);
+                        await fs.FlushAsync(cancellationToken);
+                    }
 
                     File.Move(tempPath, finalPath, overwrite: true);
 
@@ -165,7 +150,7 @@ public sealed class IconCacheService : IDisposable
                 }
                 catch
                 {
-                    // Következő fallback URL.
+                    // Try next fallback URL.
                 }
             }
 
@@ -187,7 +172,8 @@ public sealed class IconCacheService : IDisposable
             if (!File.Exists(path) || new FileInfo(path).Length < 32)
                 return false;
 
-            return Image.Identify(path) != null;
+            using SKBitmap? bitmap = SKBitmap.Decode(path);
+            return bitmap != null && bitmap.Width > 0 && bitmap.Height > 0;
         }
         catch
         {
@@ -204,14 +190,13 @@ public sealed class IconCacheService : IDisposable
         }
         catch
         {
-            // Nem kritikus. A következő indításnál újra próbáljuk.
+            // Not critical. Retry on next run.
         }
     }
 
     public void Dispose()
     {
         _httpClient.Dispose();
-
         foreach (var gate in _locks.Values)
             gate.Dispose();
     }

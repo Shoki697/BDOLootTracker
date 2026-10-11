@@ -60,21 +60,58 @@
                             <TextBlock x:Name="UploadStateText" Grid.Column="1" VerticalAlignment="Center"
                                        Foreground="{StaticResource Green}" FontWeight="SemiBold" Margin="12,0,0,0" />
                         </Grid>
-                        <ComboBox x:Name="SpotComboBox"
-                                  ItemsSource="{Binding UploadSpotOptionsView}"
-                                  SelectedItem="{Binding SelectedUploadSpot, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                  Text="{Binding UploadSpotSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                  DisplayMemberPath="Name"
-                                  TextSearch.TextPath="Name"
-                                  IsTextSearchEnabled="True"
-                                  IsEditable="True"
-                                  StaysOpenOnEdit="True"
-                                  PreviewTextInput="SpotComboBox_PreviewTextInput"
-                                  KeyUp="SpotComboBox_KeyUp"
-                                  Height="31"
-                                  Margin="0,5,0,0"
-                                  VerticalContentAlignment="Center"
-                                  ToolTip="Type any part of a Garmoth spot name to filter the list." />
+                        <Grid Margin="0,5,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Grid Grid.Row="0" Grid.ColumnSpan="2" Margin="0,0,0,5">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="SpotSearchBox"
+                                         Text="{Binding UploadSpotSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         Height="29"
+                                         Padding="8,4"
+                                         VerticalContentAlignment="Center"
+                                         ToolTip="Type any part of a Garmoth spot name to filter the list." />
+                                <Button Grid.Column="1"
+                                        Content="×"
+                                        Width="29"
+                                        Height="29"
+                                        Padding="0"
+                                        Margin="5,0,0,0"
+                                        ToolTip="Clear spot search"
+                                        Click="ClearSpotSearch_Click" />
+                            </Grid>
+
+                            <ComboBox x:Name="SpotComboBox"
+                                      Grid.Row="1"
+                                      Grid.Column="0"
+                                      ItemsSource="{Binding UploadSpotOptionsView}"
+                                      SelectedItem="{Binding SelectedUploadSpot, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      DisplayMemberPath="Name"
+                                      IsTextSearchEnabled="True"
+                                      IsEditable="False"
+                                      SelectionChanged="SpotComboBox_SelectionChanged"
+                                      Height="31"
+                                      VerticalContentAlignment="Center"
+                                      ToolTip="Select the exact Garmoth spot from the filtered list." />
+                            <Button Grid.Row="1"
+                                    Grid.Column="1"
+                                    Content="Save"
+                                    Height="31"
+                                    Padding="11,4"
+                                    Margin="7,0,0,0"
+                                    Click="SaveSessionMetadata_Click"
+                                    ToolTip="Save the selected spot and Drop Rate to this session without uploading." />
+                        </Grid>
                         <TextBlock x:Name="SpotHintText" Foreground="{StaticResource Muted}" Margin="0,4,0,0" FontSize="9.5" TextWrapping="Wrap" />
                         <TextBlock x:Name="SessionMetaText" Foreground="{StaticResource Muted}" Margin="0,7,0,0" />
                         <TextBlock x:Name="AlreadyUploadedText"

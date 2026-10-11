@@ -753,15 +753,13 @@ public sealed class CaptureService : IDisposable
                 .Where(x => x.Item2.Length > 0)
                 .ToList();
 
-            // Ground-loot-only profiles are positive allowlists. Transfer markers
-            // are kept in the JSON for backwards compatibility with older clients,
-            // but this parser deliberately does not arm suppression state in this mode.
-            _suppressMarkers = profile.GroundLootOnly
-                ? new List<byte[]>()
-                : (profile.SuppressIfPrecededBy ?? new List<string>())
-                    .Select(ParserProfileService.ParseHex)
-                    .Where(x => x.Length > 0)
-                    .ToList();
+            // Transfer BLOCK markers are always active, including GroundLootOnly
+            // profiles. This gives Market / Storage / Maid suppression priority over
+            // the positive Ground Loot fingerprint learned by the calibration wizard.
+            _suppressMarkers = (profile.SuppressIfPrecededBy ?? new List<string>())
+                .Select(ParserProfileService.ParseHex)
+                .Where(x => x.Length > 0)
+                .ToList();
         }
 
         public event Action<uint, ulong>? LootReceived;
@@ -803,8 +801,8 @@ public sealed class CaptureService : IDisposable
                 }
 
                 ObserveSuppressMarkersBefore(candidateStart);
-                bool stateSuppress = !_profile.GroundLootOnly && HasPendingTransferSuppression();
-                bool suppress = !_profile.GroundLootOnly && (stateSuppress || IsSuppressedByLookback(candidateStart));
+                bool stateSuppress = HasPendingTransferSuppression();
+                bool suppress = stateSuppress || IsSuppressedByLookback(candidateStart);
 
                 if (candidateStart > 0)
                     RemovePrefix(candidateStart);
@@ -832,13 +830,25 @@ public sealed class CaptureService : IDisposable
                     itemId > 0 && itemId <= _profile.MaxReasonableItemId &&
                     quantity > 0 && quantity <= _profile.MaxReasonableQuantity;
 
+                // Transfer suppression has first priority. A calibrated Market /
+                // Storage marker must block the inventory-add even when its payload
+                // also matches the positive Ground Loot fingerprint. This check also
+                // runs before NonGroundInventoryCandidate so transfer packets cannot
+                // leak through the Gathering fallback path.
+                if (reasonable && suppress)
+                {
+                    TransferSuppressed?.Invoke(itemId, quantity);
+                    if (stateSuppress)
+                        ClearPendingTransferSuppression();
+
+                    RemovePrefix(packetLength);
+                    continue;
+                }
+
                 if (_profile.GroundLootOnly && !MatchesGroundLoot(packetLength))
                 {
                     // Gathering can use the same inventory-add packet family while
                     // carrying a different subtype/fingerprint from mob ground loot.
-                    // Do not count it here. Surface only the parsed candidate and let
-                    // MainWindow accept it when the Item ID/name is gathering evidence.
-                    // Storage/Market/Maid candidates therefore remain rejected by default.
                     if (reasonable)
                         NonGroundInventoryCandidate?.Invoke(itemId, quantity);
 
@@ -847,23 +857,7 @@ public sealed class CaptureService : IDisposable
                 }
 
                 if (reasonable)
-                {
-                    if (suppress)
-                    {
-                        TransferSuppressed?.Invoke(itemId, quantity);
-
-                        // State suppression is intentionally one-shot. A single
-                        // Storage/Maid/Market transfer marker suppresses the next
-                        // reasonable inventory-add candidate only, preventing a
-                        // stale transfer state from swallowing later real mob loot.
-                        if (stateSuppress)
-                            ClearPendingTransferSuppression();
-                    }
-                    else
-                    {
-                        LootReceived?.Invoke(itemId, quantity);
-                    }
-                }
+                    LootReceived?.Invoke(itemId, quantity);
 
                 RemovePrefix(packetLength);
             }
